@@ -2,7 +2,7 @@
 #include <pigpio.h>
 #include <signal.h>
 
-#define PP_BUTTON 4
+#define PP_BUTTON 23
 #define SKIP_BUTTON 27
 #define BACK_BUTTON 22
 #define ADC_ADDR 0x4b
@@ -30,6 +30,31 @@ int readADC(int handle, int channel) {
     return (int)data[0];
 }
 
+void buttonPressed(int gpio, int level, uint32_t tick) {
+    static uint32_t lastTick = 0;
+    if (tick - lastTick < 100000) return;
+
+    lastTick = tick;
+    if (level == PI_LOW) {
+        switch (gpio) {
+            case PP_BUTTON:
+                printf("Play/Pause\n");
+                break;
+
+            case SKIP_BUTTON:
+                printf("Skip Song\n");
+                break;
+
+            case BACK_BUTTON:
+                printf("Previous Song\n");
+                break;
+
+            default:
+                break;
+        }
+    }
+}
+
 int main() {
     signal(SIGINT, handle_sigint);
 
@@ -46,6 +71,13 @@ int main() {
         gpioTerminate();
         return 1;
     }
+
+    gpioSetMode(PP_BUTTON, PI_INPUT);
+    gpioSetPullUpDown(PP_BUTTON, PI_PUD_UP);
+    gpioSetMode(SKIP_BUTTON, PI_INPUT);
+    gpioSetPullUpDown(SKIP_BUTTON, PI_PUD_UP);
+    gpioSetMode(BACK_BUTTON, PI_INPUT);
+    gpioSetPullUpDown(BACK_BUTTON, PI_PUD_UP);
 
     int prev = -1;
     while (running) {
@@ -64,6 +96,12 @@ int main() {
 
             prev = values;
         }
+
+        gpioSetAlertFunc(PP_BUTTON, buttonPressed);
+        gpioSetAlertFunc(SKIP_BUTTON, buttonPressed);
+        gpioSetAlertFunc(BACK_BUTTON, buttonPressed);
+
+        time_sleep(0.1);
 
     }
 
