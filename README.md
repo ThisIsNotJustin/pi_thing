@@ -13,6 +13,8 @@ The project is developed in C, utilizing the `pigpio` library for GPIO handling 
 - **Touchscreen GUI**: A responsive and intuitive UI using `raygui` for easy navigation.
 - **Real-time Feedback**: Display song progress, volume control, and album artwork.
 
+## Prototype
+
 ## Hardware Requirements
 
 - Raspberry Pi Zero 2 W
