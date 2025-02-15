@@ -1,11 +1,15 @@
 #include "raylib.h"
+#include "buttons.h"
 
 #define RAYGUI_IMPLEMENTATION
 #include "./src/raygui.h"
 #include "./src/raygui/styles/dark/style_dark.h"
 
+#define SCREEN_WIDTH 800
+#define SCREEN_HEIGHT 480
+
 int main() {
-    InitWindow(800, 480, "Spotify Pi Thing");
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "Spotify Pi Thing");
     GuiLoadStyleDark();
     SetTargetFPS(60);
     
@@ -17,13 +21,9 @@ int main() {
 
         if (GuiButton((Rectangle){ 24, 24, 120, 30 }, "#191#Show Message")) showMessageBox = true;
 
-        if (showMessageBox) {
-            int result = GuiMessageBox((Rectangle){ 85, 70, 250, 100 },
-                "#191#Message Box", "Hi! This is a message!", "Nice;Cool");
+        if (GuiButton((Rectangle){ 85, 70, 250, 100 }, is_playing ? "Pause" : "Play")) {
+            is_playing = !is_playing;
 
-            if (result >= 0) {
-                showMessageBox = false;
-            }
         }
 
         EndDrawing();
