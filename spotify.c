@@ -21,10 +21,6 @@
 #define SCREEN_HEIGHT 480
 
 volatile int running = 1;
-// use to determine what the app should display first
-// do we need to display 2 text fields for a user's clientid and client secret
-// then send to login with spotify is successful? Or has the user already done
-// this step and we can immediately display our spotify app
 volatile bool logged_in = false;
 // transfer to SpotifyClient?
 volatile bool is_playing = false;
@@ -227,7 +223,18 @@ int main() {
                 activeText = 2;
             }
 
-            // no way to validate at the moment but we need to handle touch screen input
+            // no way to validate at the moment so just assuming this works
+            if (GetTouchPointCount() > 0) {
+                Vector2 touchPos = GetTouchPosition(0);
+
+                if (CheckCollisionPointRec(touchPos, clientIdInput)) {
+                    activeText = 1;
+                }
+
+                if (CheckCollisionPointRec(touchPos, clientSecretInput)) {
+                    activeText = 2;
+                }
+            }
 
             GuiTextBox(clientIdInput, client_id, 128, activeText == 1);
             GuiTextBox(clientSecretInput, client_secret, 128, activeText == 2);
