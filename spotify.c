@@ -4,6 +4,8 @@
 #include <pigpio.h>
 #include <signal.h>
 #include <pthread.h>
+#include <string.h>
+#include <stdlib.h>
 
 #define PP_BUTTON 23
 #define SKIP_BUTTON 27
@@ -19,7 +21,14 @@
 #define SCREEN_HEIGHT 480
 
 volatile int running = 1;
+// use to determine what the app should display first
+// do we need to display 2 text fields for a user's clientid and client secret
+// then send to login with spotify is successful? Or has the user already done
+// this step and we can immediately display our spotify app
+volatile bool logged_in = false;
+// transfer to SpotifyClient?
 volatile bool is_playing = false;
+// make a mutex for the entire SpotifyClient?
 pthread_mutex_t is_playing_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void handle_sigint(int sig) {
@@ -132,6 +141,12 @@ int main() {
     GuiLoadStyleDark();
     SetTargetFPS(60);
 
+    char client_id[256] = {0};
+    char client_secret[256] = {0};
+
+    // 0 - none, 1 - client id, 2 - client secret
+    int activeText = 0;
+
     while (!WindowShouldClose() && running) {
         if (IsKeyPressed(KEY_ESCAPE)) {
             running = 0;
@@ -140,15 +155,46 @@ int main() {
         BeginDrawing();
         ClearBackground(GetColor(GuiGetStyle(DEFAULT, BACKGROUND_COLOR)));
 
-        bool current_playing;
-        pthread_mutex_lock(&is_playing_mutex);
-        current_playing = is_playing;
-        pthread_mutex_unlock(&is_playing_mutex);
-
-        if (GuiButton((Rectangle){ 85, 70, 250, 100 }, is_playing ? "Pause" : "Play")) {
+        // if the user is already logged in, display app like normal
+        // otherwise we need the user to give their client id, secret, 
+        // and login with spotify
+        if (logged_in) {
+            bool current_playing;
             pthread_mutex_lock(&is_playing_mutex);
-            is_playing = !is_playing;
+            current_playing = is_playing;
             pthread_mutex_unlock(&is_playing_mutex);
+
+            if (GuiButton((Rectangle){ 85, 70, 250, 100 }, is_playing ? "Pause" : "Play")) {
+                pthread_mutex_lock(&is_playing_mutex);
+                is_playing = !is_playing;
+                pthread_mutex_unlock(&is_playing_mutex);
+            }
+        } else {
+            DrawText("Enter Spotify Client ID: ", 85, 40, 20, WHITE);
+            Rectangle clientIdInput = {85, 70, 250, 30};
+
+            DrawText("Enter Spotify Client Secret: ", 85, 110, 20, WHITE);
+            Rectangle clientSecretInput = {85, 140, 250, 30};
+
+            if (CheckCollisionPointRec(GetMousePosition(), clientIdInput) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                activeText = 1;
+            }
+
+            if (CheckCollisionPointRec(GetMousePosition(), clientSecretInput) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                activeText = 2;
+            }
+
+            // no way to validate at the moment but we need to handle touch screen input
+
+            GuiTextBox(clientIdInput, client_id, 128, activeText == 1);
+            GuiTextBox(clientSecretInput, client_secret, 128, activeText == 2);
+
+            // just simulating a successful login at the moment
+            if (GuiButton((Rectangle){85, 170, 250, 40}, "Login with Spotify")) {
+                if (strlen(client_id) > 0 && strlen(client_secret) > 0) {
+                    logged_in = true;
+                }
+            }
         }
 
         EndDrawing();
