@@ -31,6 +31,49 @@ volatile bool is_playing = false;
 // make a mutex for the entire SpotifyClient?
 pthread_mutex_t is_playing_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+typedef struct SongInfo {
+    char title[128];
+    char artist[128];
+    char album[128];
+    char url[256]; 
+    int progress;
+    int duration;
+} SongInfo;
+
+typedef enum SearchResults {
+    playlist,
+    album
+} SearchResults;
+
+typedef struct SpotifyClient {
+    char access_token[256];
+    char refresh_token[256];
+    int refresh_timer;
+    int refresh_timeout;
+    int volume;
+    bool is_playing;
+    bool shuffle;
+    char current_playing_id[256];
+} SpotifyClient;
+
+// spotify client constructor from token
+// refresh token
+
+// get song
+// get volume
+// change volume
+// get playback state
+// get shuffle state
+// get liked state
+// set playback state
+// set shuffle state
+// set liked state
+// skip song
+// previous song
+// search
+// play
+// pause
+
 void handle_sigint(int sig) {
     running = 0;
 }
