@@ -1,10 +1,12 @@
 #include "raylib.h"
 
 #define RAYGUI_IMPLEMENTATION
-#include "raygui.h"
+#include "./src/raygui.h"
+#include "./src/raygui/styles/dark/style_dark.h"
 
 int main() {
     InitWindow(800, 480, "Spotify Pi Thing");
+    GuiLoadStyleDark();
     SetTargetFPS(60);
     
     bool showMessageBox = false;
