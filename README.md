@@ -14,6 +14,7 @@ The project is developed in C, utilizing the `pigpio` library for GPIO handling 
 - **Real-time Feedback**: Display song progress, volume control, and album artwork.
 
 ## Prototype
+![Prototype](./demo/prototype/pithing.jpg)
 
 ## Hardware Requirements
 
