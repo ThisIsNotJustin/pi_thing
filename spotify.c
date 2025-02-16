@@ -209,11 +209,15 @@ int main() {
                 pthread_mutex_unlock(&is_playing_mutex);
             }
         } else {
-            DrawText("Enter Spotify Client ID: ", 85, 40, 20, WHITE);
-            Rectangle clientIdInput = {85, 70, 250, 30};
+            // text is roughly centered above rectangle
+            // rectangle is centered plus padding between it and client secret text
+            DrawText("Enter Spotify Client ID: ", SCREEN_WIDTH/2 - 125 + 5, SCREEN_HEIGHT/3 - 80, 20, WHITE);
+            Rectangle clientIdInput = {SCREEN_WIDTH/2 - 125, SCREEN_HEIGHT/3 - 50, 250, 30};
 
-            DrawText("Enter Spotify Client Secret: ", 85, 110, 20, WHITE);
-            Rectangle clientSecretInput = {85, 140, 250, 30};
+            // text is roughly centered above rectangle
+            // rectangle is centered plus padding between it and spotify login button
+            DrawText("Enter Spotify Client Secret: ", SCREEN_WIDTH/2 - 125 - 15, SCREEN_HEIGHT/2 - 80, 20, WHITE);
+            Rectangle clientSecretInput = {SCREEN_WIDTH/2 - 125, SCREEN_HEIGHT/2 - 50, 250, 30};
 
             if (CheckCollisionPointRec(GetMousePosition(), clientIdInput) && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                 activeText = 1;
@@ -240,7 +244,8 @@ int main() {
             GuiTextBox(clientSecretInput, client_secret, 128, activeText == 2);
 
             // just simulating a successful login at the moment
-            if (GuiButton((Rectangle){85, 170, 250, 40}, "Login with Spotify")) {
+            // should be about centered
+            if (GuiButton((Rectangle){SCREEN_WIDTH/2 - 125, SCREEN_HEIGHT/2, 250, 40}, "Login with Spotify")) {
                 if (strlen(client_id) > 0 && strlen(client_secret) > 0) {
                     logged_in = true;
                 }
