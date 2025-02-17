@@ -29,10 +29,6 @@
 
 volatile int running = 1;
 volatile bool logged_in = false;
-// transfer to SpotifyClient?
-volatile bool is_playing = false;
-// make a mutex for the entire SpotifyClient?
-pthread_mutex_t is_playing_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct SongInfo {
     char title[128];
@@ -280,12 +276,12 @@ void buttonPressed(int gpio, int level, uint32_t tick) {
     lastTick = tick;
 
     if (level == PI_LOW) {
-        pthread_mutex_lock(&is_playing_mutex);
+        pthread_mutex_lock(&spclient_mutex);
 
         switch (gpio) {
             case PP_BUTTON:
-                is_playing = !is_playing;
-                printf("Status: %s\n", is_playing ? "Playing" : "Paused");
+                spclient.is_playing = !spclient.is_playing;
+                printf("Status: %s\n", spclient.is_playing ? "Playing" : "Paused");
                 break;
 
             case SKIP_BUTTON:
@@ -299,7 +295,7 @@ void buttonPressed(int gpio, int level, uint32_t tick) {
             default:
                 break;
         }
-        pthread_mutex_unlock(&is_playing_mutex);
+        pthread_mutex_unlock(&spclient_mutex);
     }
 }
 
@@ -420,7 +416,23 @@ int main() {
                 GuiTextBox(clientIdInput, client_id, 128, activeText == 1);
                 GuiTextBox(clientSecretInput, client_secret, 128, activeText == 2);
 
-                // just simulating a successful login at the moment
+                // temp for speeding up development
+                // auto inserts client id and secret (replace xxxx)
+                // !not for production!
+                if (GuiLabelButton((Rectangle){SCREEN_WIDTH/2 - 125, SCREEN_HEIGHT/2 + 50, 50, 50}, "Auto")) {
+                    strncpy(client_id, "xxxx", sizeof(client_id));
+                    client_id[sizeof(client_id) - 1] = '\0';
+
+                    strncpy(client_secret, "xxxx", sizeof(client_secret));
+                    client_secret[sizeof(client_secret) - 1] = '\0';
+                }
+
+                // once we have input for client id and secret
+                // login with spotify button becomes clickable
+                // displays authentication qr code to be scanned
+                // 
+                // if client id and secret align with spotify account
+                // spotify pi thing app opens
                 // should be about centered
                 if (GuiButton((Rectangle){SCREEN_WIDTH/2 - 125, SCREEN_HEIGHT/2, 250, 40}, "Login with Spotify")) {
                     if (strlen(client_id) > 0 && strlen(client_secret) > 0) {
@@ -486,7 +498,7 @@ int main() {
                 int texX = (SCREEN_WIDTH - qrtexture.width) / 2;
                 int texY = (SCREEN_HEIGHT - qrtexture.height) / 2;
                 DrawTexture(qrtexture, texX, texY, WHITE);
-                DrawText("Scan QR Code!", SCREEN_WIDTH/2 - 120, texY - 30, 20, WHITE);
+                DrawText("Scan QR Code!", SCREEN_WIDTH/2 - 70, texY - 30, 20, WHITE);
 
                 pthread_mutex_lock(&logged_in_mutex);
                 if (logged_in) {
@@ -497,14 +509,14 @@ int main() {
 
             case STATE_APP:
                 bool current_playing;
-                pthread_mutex_lock(&is_playing_mutex);
-                current_playing = is_playing;
-                pthread_mutex_unlock(&is_playing_mutex);
+                pthread_mutex_lock(&spclient_mutex);
+                current_playing = spclient.is_playing;
+                pthread_mutex_unlock(&spclient_mutex);
 
-                if (GuiButton((Rectangle){ 85, 70, 250, 100 }, is_playing ? "Pause" : "Play")) {
-                    pthread_mutex_lock(&is_playing_mutex);
-                    is_playing = !is_playing;
-                    pthread_mutex_unlock(&is_playing_mutex);
+                if (GuiButton((Rectangle){ 85, 70, 250, 100 }, spclient.is_playing ? "Pause" : "Play")) {
+                    pthread_mutex_lock(&spclient_mutex);
+                    spclient.is_playing = !spclient.is_playing;
+                    pthread_mutex_unlock(&spclient_mutex);
                 }
                 break;
         }
