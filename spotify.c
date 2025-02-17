@@ -233,6 +233,29 @@ void* http_server_thread(void *arg) {
         return NULL;
 }
 
+bool spotify_request(const char *endpoint, const char *access_token) {
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        return false;
+    }
+
+    struct curl_slist *headers = NULL;
+    char auth_header[256];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", access_token);
+    headers = curl_slist_append(headers, auth_header);
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    curl_easy_setopt(curl, CURLOPT_URL, endpoint);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+        
+    CURLcode res = curl_easy_perform(curl);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    return (res == CURLE_OK);
+}
+
 // spotify client constructor from token
 // refresh token
 
@@ -280,7 +303,20 @@ void buttonPressed(int gpio, int level, uint32_t tick) {
 
         switch (gpio) {
             case PP_BUTTON:
-                spclient.is_playing = !spclient.is_playing;
+                bool current_playing = spclient.is_playing;
+                const char *access_token = spclient.access_token;
+                char endpoint[256];
+                // add device id to this call
+                snprintf(
+                    endpoint, 
+                    sizeof(endpoint), 
+                    "https://api.spotify.com/v1/me/player/%s",
+                    current_playing ? "pause" : "play"
+                );    
+                bool success = spotify_request(endpoint, access_token);
+                if (success) {
+                    spclient.is_playing = !spclient.is_playing;
+                }
                 printf("Status: %s\n", spclient.is_playing ? "Playing" : "Paused");
                 break;
 
@@ -514,9 +550,16 @@ int main() {
                 pthread_mutex_unlock(&spclient_mutex);
 
                 if (GuiButton((Rectangle){ 85, 70, 250, 100 }, spclient.is_playing ? "Pause" : "Play")) {
-                    pthread_mutex_lock(&spclient_mutex);
-                    spclient.is_playing = !spclient.is_playing;
-                    pthread_mutex_unlock(&spclient_mutex);
+                    const char *access_token = spclient.access_token;
+                    const char *endpoint = current_playing ? 
+                        "https://api.spotify.com/v1/me/player/pause" : "https://api.spotify.com/v1/me/player/play";
+                    
+                    bool success = spotify_request(endpoint, access_token);
+                    if (success) {
+                        pthread_mutex_lock(&spclient_mutex);
+                        spclient.is_playing = !spclient.is_playing;
+                        pthread_mutex_unlock(&spclient_mutex);
+                    }
                 }
                 break;
         }
