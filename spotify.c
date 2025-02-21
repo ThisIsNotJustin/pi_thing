@@ -14,6 +14,27 @@
 #include <curl/curl.h>
 #include <qrencode.h>
 
+/*
+    TODO:
+        Volume - if its 0-100 just divide the potentiometer value by 2.55?
+        call whatever spotify api with it I assume
+    
+        More attractive gui
+        gui prev/next buttons
+        gui shuffle and like buttons
+
+        home screen - the recent playlists/random spotify stuff scree
+        display 3 items at a time
+
+        your library - your playlists and liked songs
+        display 3 items at a time I assume
+
+        Can the car thing actually open playlists or does clicking a playlist
+        simply shuffle play it? - investigate
+        I think the pi would really struggle to display a lot of songs in a playlist
+        but maybe we display 3-5 at a time and request more as the user scrolls?
+*/
+
 #define PP_BUTTON 23
 #define SKIP_BUTTON 22
 #define BACK_BUTTON 27
