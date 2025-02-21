@@ -15,8 +15,8 @@
 #include <qrencode.h>
 
 #define PP_BUTTON 23
-#define SKIP_BUTTON 27
-#define BACK_BUTTON 22
+#define SKIP_BUTTON 22
+#define BACK_BUTTON 27
 #define ADC_ADDR 0x4b
 
 #include "raylib.h"
@@ -40,8 +40,8 @@ typedef struct SongInfo {
 } SongInfo;
 
 typedef enum SearchResults {
-    playlist,
-    album
+    PLAYLIST,
+    ALBUM
 } SearchResults;
 
 typedef struct SpotifyClient {
@@ -64,20 +64,26 @@ typedef enum AppState {
     STATE_APP
 } AppState;
 
+typedef struct {
+    char *memory;
+    size_t size;
+} MemoryBuffer;
+
 SpotifyClient spclient;
 pthread_mutex_t spclient_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t logged_in_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 size_t write_callback(void *content, size_t size, size_t n, void *user) {
     size_t realsize = size * n;
-    char **response = (char **)user;
-    *response = realloc(*response, realsize + 1);
-    if (*response == NULL) {
+    MemoryBuffer *mem = (MemoryBuffer *)user;
+    char *response = realloc(mem->memory, mem->size + realsize + 1);
+    if (!response) {
         return 0;
     }
-
-    memcpy(*response, content, realsize);
-    (*response)[realsize] = '\0';
+    mem->memory = response;
+    memcpy(&(mem->memory[mem->size]), content, realsize);
+    mem->size += realsize;
+    mem->memory[mem->size] = 0;
     
     return realsize;
 }
@@ -174,7 +180,14 @@ void* http_server_thread(void *arg) {
 
     CURL *curl = curl_easy_init();
     if (curl) {
-        char *response = NULL;
+        MemoryBuffer response = {
+            malloc(1),
+            0
+        };
+        if (!response.memory) {
+            return NULL;
+        }
+
         char pdata[1024];
         snprintf(pdata, sizeof(pdata),
             "grant_type=authorization_code&"
@@ -191,11 +204,11 @@ void* http_server_thread(void *arg) {
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, pdata);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&response);
         
         CURLcode res = curl_easy_perform(curl);
-        if (res == CURLM_OK && response != NULL) {
-            cJSON *json = cJSON_Parse(response);
+        if (res == CURLM_OK && response.size != 0) {
+            cJSON *json = cJSON_Parse(response.memory);
             if (json) {
                 cJSON *access_token_json = cJSON_GetObjectItemCaseSensitive(json, "access_token");
                 cJSON *refresh_token_json = cJSON_GetObjectItemCaseSensitive(json, "refresh_token");
@@ -217,7 +230,6 @@ void* http_server_thread(void *arg) {
                 }
                 cJSON_Delete(json);
             }
-            free(response);
         }
 
         curl_slist_free_all(headers);
@@ -233,7 +245,17 @@ void* http_server_thread(void *arg) {
         return NULL;
 }
 
-bool spotify_request(const char *endpoint, const char *access_token) {
+bool spotify_request(const char *endpoint_base, const char *access_token) {
+    char endpoint[512];
+    pthread_mutex_lock(&spclient_mutex);
+    if (strlen(spclient.current_playing_id) > 0) {
+        snprintf(endpoint, sizeof(endpoint), "%s?device=%s", endpoint_base, spclient.current_playing_id);
+    } else {
+        strncpy(endpoint, endpoint_base, sizeof(endpoint) - 1);
+        endpoint[sizeof(endpoint) - 1] = '\0';
+    }
+    pthread_mutex_unlock(&spclient_mutex);
+
     CURL *curl = curl_easy_init();
     if (!curl) {
         return false;
@@ -274,6 +296,147 @@ bool spotify_request(const char *endpoint, const char *access_token) {
 // play
 // pause
 
+bool fetch_current_state(SongInfo *song) {
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        return false;
+    }
+
+    MemoryBuffer region = {
+        malloc(1),
+        0
+    };
+    if (!region.memory) {
+        return false;
+    }
+
+    char url[256];
+    snprintf(url, sizeof(url), "https://api.spotify.com/v1/me/player");
+
+    pthread_mutex_lock(&spclient_mutex);
+    char auth_header[256];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", spclient.access_token);
+    pthread_mutex_unlock(&spclient_mutex);
+
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, auth_header);
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&region);
+
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    curl_slist_free_all(headers);
+
+    if (res != CURLE_OK || region.size == 0) {
+        free(region.memory);
+        
+        return false;
+    }
+
+    cJSON *json = cJSON_Parse(region.memory);
+    free(region.memory);
+    if (!json) {
+        return false;
+    }
+
+    cJSON *err = cJSON_GetObjectItem(json, "error");
+    if (err) {
+        cJSON_Delete(json);
+
+        return false;
+    }
+
+    cJSON *is_playing_json = cJSON_GetObjectItem(json, "is_playing");
+    if (cJSON_IsBool(is_playing_json)) {
+        spclient.is_playing = cJSON_IsTrue(is_playing_json);
+    }
+
+    cJSON *progress_ms_json = cJSON_GetObjectItem(json, "progress_ms");
+    song->progress = (cJSON_IsNumber(progress_ms_json)) ? progress_ms_json->valueint / 1000 : 0;
+
+    cJSON *item = cJSON_GetObjectItem(json, "item");
+    if (item) {
+        cJSON *title_json = cJSON_GetObjectItem(item, "name");
+        if (cJSON_IsString(title_json)) {
+            strncpy(song->title, title_json->valuestring, sizeof(song->title));
+        }
+
+        cJSON *duration_json = cJSON_GetObjectItem(item, "duration_ms");
+        song->duration = (cJSON_IsNumber(duration_json)) ? duration_json->valueint / 1000 : 0;
+
+        cJSON *album = cJSON_GetObjectItem(item, "album");
+        if (album) {
+            cJSON *album_name_json = cJSON_GetObjectItem(album, "name");
+            if (cJSON_IsString(album_name_json)) {
+                strncpy(song->album, album_name_json->valuestring, sizeof(song->album));
+            }
+
+            cJSON *images_json = cJSON_GetObjectItem(album, "images");
+            if (images_json && cJSON_IsArray(images_json)) {
+                cJSON *first_image = cJSON_GetArrayItem(images_json, 0);
+                if (first_image) {
+                    cJSON *image_url_json = cJSON_GetObjectItem(first_image, "url");
+                    if (cJSON_IsString(image_url_json)) {
+                        strncpy(song->url, image_url_json->valuestring, sizeof(song->url));
+                    }
+                }
+            }
+        }
+
+        cJSON *artists = cJSON_GetObjectItem(item, "artists");
+        if (artists && cJSON_IsArray(artists)) {
+            cJSON *first_artist_json = cJSON_GetArrayItem(artists, 0);
+            if (first_artist_json) {
+                cJSON *arist_name_json = cJSON_GetObjectItem(first_artist_json, "name");
+                if (cJSON_IsString(arist_name_json)) {
+                    strncpy(song->artist, arist_name_json->valuestring, sizeof(song->artist));
+                }
+            }
+        }
+    }
+
+    cJSON_Delete(json);
+
+    return true;
+}
+
+Texture2D load_album_art(const char *image_url) {
+    Texture2D texture = {0};
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        return texture;
+    }
+
+    MemoryBuffer imgBuffer = {
+        malloc(1),
+        0
+    };
+    if (!imgBuffer.memory) {
+        return texture;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, image_url);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&imgBuffer);
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+
+    if (res == CURLE_OK && imgBuffer.size > 0) {
+        Image img = LoadImageFromMemory(".jpg", (unsigned char *)imgBuffer.memory, imgBuffer.size);
+        if (img.data) {
+            texture = LoadTextureFromImage(img);
+            UnloadImage(img);
+        }
+    }
+
+    free(imgBuffer.memory);
+    return texture;
+}
+
 void handle_sigint(int sig) {
     running = 0;
 }
@@ -300,24 +463,21 @@ void buttonPressed(int gpio, int level, uint32_t tick) {
 
     if (level == PI_LOW) {
         pthread_mutex_lock(&spclient_mutex);
+        bool current_playing = spclient.is_playing;
+        const char *access_token = spclient.access_token;
+        pthread_mutex_unlock(&spclient_mutex);
 
         switch (gpio) {
             case PP_BUTTON:
-                bool current_playing = spclient.is_playing;
-                const char *access_token = spclient.access_token;
-                char endpoint[256];
-                // add device id to this call
-                snprintf(
-                    endpoint, 
-                    sizeof(endpoint), 
-                    "https://api.spotify.com/v1/me/player/%s",
-                    current_playing ? "pause" : "play"
-                );    
-                bool success = spotify_request(endpoint, access_token);
+                const char *endpoint_base = current_playing ?
+                    "https://api.spotify.com/v1/me/player/pause" :
+                    "https://api.spotify.com/v1/me/player/play";
+                bool success = spotify_request(endpoint_base, access_token);
                 if (success) {
+                    pthread_mutex_lock(&spclient_mutex);
                     spclient.is_playing = !spclient.is_playing;
+                    pthread_mutex_unlock(&spclient_mutex);
                 }
-                printf("Status: %s\n", spclient.is_playing ? "Playing" : "Paused");
                 break;
 
             case SKIP_BUTTON:
@@ -385,6 +545,94 @@ void* gpio_thread_func(void* arg) {
 }
 
 static Texture2D qrtexture = {0};
+
+AppState display_qr(AppState currentState) {
+    // Center the QR texture on screen
+    int texX = (SCREEN_WIDTH - qrtexture.width) / 2;
+    int texY = (SCREEN_HEIGHT - qrtexture.height) / 2;
+    DrawTexture(qrtexture, texX, texY, WHITE);
+    DrawText("Scan QR Code!", SCREEN_WIDTH/2 - 70, texY - 30, 20, WHITE);
+
+    pthread_mutex_lock(&logged_in_mutex);
+    if (logged_in) {
+        currentState = STATE_APP;
+    }
+    pthread_mutex_unlock(&logged_in_mutex);
+
+    return currentState;
+}
+
+SongInfo current_song = {0};
+Texture2D albumTexture = {0};
+
+void display_app() {
+    bool hasPlayback = fetch_current_state(&current_song);
+    if (hasPlayback) {
+        if (strlen(current_song.url) > 0 && albumTexture.id == 0) {
+            albumTexture = load_album_art(current_song.url);
+        }
+
+        if (albumTexture.id != 0) {
+            int imgX = (SCREEN_WIDTH - albumTexture.width) / 2;
+            DrawTexture(albumTexture, imgX, 0, WHITE);
+        }
+
+        char infoText[256];
+        snprintf(infoText, sizeof(infoText), "%s - %s", current_song.title, current_song.artist);
+        DrawText(infoText, 50, SCREEN_HEIGHT - 120, 20, WHITE);
+
+        float progress_ratio = (current_song.duration > 0) ? (float)current_song.progress / current_song.duration : 0;
+        GuiProgressBar((Rectangle){ 50, SCREEN_HEIGHT - 80, SCREEN_WIDTH - 100, 30 }, "", "", &progress_ratio, 0, 1);
+        bool current_playing;
+        pthread_mutex_lock(&spclient_mutex);
+        current_playing = spclient.is_playing;
+        pthread_mutex_unlock(&spclient_mutex);
+
+        if (GuiButton((Rectangle){ 50, SCREEN_HEIGHT - 40, 100, 30 }, spclient.is_playing ? "Pause" : "Play")) {
+            const char *access_token = spclient.access_token;
+            const char *endpoint = current_playing ?
+                "https://api.spotify.com/v1/me/player/pause" : "https://api.spotify.com/v1/me/player/play";
+            if (spotify_request(endpoint, spclient.access_token)) {
+                pthread_mutex_lock(&spclient_mutex);
+                spclient.is_playing = !spclient.is_playing;
+                pthread_mutex_unlock(&spclient_mutex);
+            }
+        }
+    } else {
+        // No active playback found, display a prompt and a refresh button.
+        DrawText("No active Spotify device found.\nPlease open Spotify on a device.", 
+                 SCREEN_WIDTH/2 - 150, SCREEN_HEIGHT/2 - 40, 20, WHITE);
+        if (GuiButton((Rectangle){SCREEN_WIDTH/2 - 50, SCREEN_HEIGHT/2 + 20, 100, 40}, "Refresh")) {
+            // Clear previous album texture so that if playback is now active, we reload the album art.
+            if (albumTexture.id != 0) {
+                UnloadTexture(albumTexture);
+                albumTexture = (Texture2D){0};
+            }
+            // Optionally, you could call fetch_current_playback() immediately here.
+        }
+    }
+ 
+    /*
+    bool current_playing;
+    pthread_mutex_lock(&spclient_mutex);
+    current_playing = spclient.is_playing;
+    pthread_mutex_unlock(&spclient_mutex);
+
+    if (GuiButton((Rectangle){ 85, 70, 250, 100 }, spclient.is_playing ? "Pause" : "Play")) {
+        const char *access_token = spclient.access_token;
+        const char *endpoint = current_playing ? 
+        "https://api.spotify.com/v1/me/player/pause" : "https://api.spotify.com/v1/me/player/play";
+                    
+        bool success = spotify_request(endpoint, access_token);
+        if (success) {
+            pthread_mutex_lock(&spclient_mutex);
+            spclient.is_playing = !spclient.is_playing;
+            pthread_mutex_unlock(&spclient_mutex);
+        }
+    }
+    */
+ 
+}
 
 int main() {
     signal(SIGINT, handle_sigint);
@@ -456,10 +704,10 @@ int main() {
                 // auto inserts client id and secret (replace xxxx)
                 // !not for production!
                 if (GuiLabelButton((Rectangle){SCREEN_WIDTH/2 - 125, SCREEN_HEIGHT/2 + 50, 50, 50}, "Auto")) {
-                    strncpy(client_id, "xxxx", sizeof(client_id));
+                    strncpy(client_id, "4f3a06ce42164770914c78489a8bd5cf", sizeof(client_id));
                     client_id[sizeof(client_id) - 1] = '\0';
 
-                    strncpy(client_secret, "xxxx", sizeof(client_secret));
+                    strncpy(client_secret, "51bca4d43abb41f1873bf1f22827d364", sizeof(client_secret));
                     client_secret[sizeof(client_secret) - 1] = '\0';
                 }
 
@@ -530,37 +778,11 @@ int main() {
                 break;
 
             case STATE_QR_CODE:
-                // Center the QR texture on screen
-                int texX = (SCREEN_WIDTH - qrtexture.width) / 2;
-                int texY = (SCREEN_HEIGHT - qrtexture.height) / 2;
-                DrawTexture(qrtexture, texX, texY, WHITE);
-                DrawText("Scan QR Code!", SCREEN_WIDTH/2 - 70, texY - 30, 20, WHITE);
-
-                pthread_mutex_lock(&logged_in_mutex);
-                if (logged_in) {
-                    currentState = STATE_APP;
-                }
-                pthread_mutex_unlock(&logged_in_mutex);
+                currentState = display_qr(currentState);
                 break;
 
             case STATE_APP:
-                bool current_playing;
-                pthread_mutex_lock(&spclient_mutex);
-                current_playing = spclient.is_playing;
-                pthread_mutex_unlock(&spclient_mutex);
-
-                if (GuiButton((Rectangle){ 85, 70, 250, 100 }, spclient.is_playing ? "Pause" : "Play")) {
-                    const char *access_token = spclient.access_token;
-                    const char *endpoint = current_playing ? 
-                        "https://api.spotify.com/v1/me/player/pause" : "https://api.spotify.com/v1/me/player/play";
-                    
-                    bool success = spotify_request(endpoint, access_token);
-                    if (success) {
-                        pthread_mutex_lock(&spclient_mutex);
-                        spclient.is_playing = !spclient.is_playing;
-                        pthread_mutex_unlock(&spclient_mutex);
-                    }
-                }
+                display_app();
                 break;
         }
 
