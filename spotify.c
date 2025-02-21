@@ -30,7 +30,7 @@
 volatile int running = 1;
 volatile bool logged_in = false;
 
-typedef struct SongInfo {
+typedef struct {
     char title[128];
     char artist[128];
     char album[128];
@@ -39,12 +39,12 @@ typedef struct SongInfo {
     int duration;
 } SongInfo;
 
-typedef enum SearchResults {
+typedef enum {
     PLAYLIST,
     ALBUM
 } SearchResults;
 
-typedef struct SpotifyClient {
+typedef struct {
     char client_id[256];
     char client_secret[256];
     char access_token[256];
@@ -56,9 +56,10 @@ typedef struct SpotifyClient {
     bool is_playing;
     bool shuffle;
     char current_playing_id[256];
+    char current_track_id[256];
 } SpotifyClient;
 
-typedef enum AppState {
+typedef enum {
     STATE_LOGIN,
     STATE_QR_CODE,
     STATE_APP
@@ -69,15 +70,36 @@ typedef struct {
     size_t size;
 } MemoryBuffer;
 
+typedef struct {
+    char client_id[256];
+    char client_secret[256];
+    char state[256];
+    char redirect_uri[256];
+} AuthData;
+
+typedef struct {
+    char endpoint[512];
+    bool usePost;
+    char access_token[256];
+} NetCmdData;
+
 SpotifyClient spclient;
 pthread_mutex_t spclient_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t logged_in_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+SongInfo current_song = {0};
+Texture2D albumTexture = {0};
+
+static Texture2D qrtexture = {0};
 
 size_t write_callback(void *content, size_t size, size_t n, void *user) {
     size_t realsize = size * n;
     MemoryBuffer *mem = (MemoryBuffer *)user;
     char *response = realloc(mem->memory, mem->size + realsize + 1);
     if (!response) {
+        free(mem->memory);
+        mem->memory = NULL;
+        mem->size = 0;
         return 0;
     }
     mem->memory = response;
@@ -87,13 +109,6 @@ size_t write_callback(void *content, size_t size, size_t n, void *user) {
     
     return realsize;
 }
-
-typedef struct AuthData {
-    char client_id[256];
-    char client_secret[256];
-    char state[256];
-    char redirect_uri[256];
-} AuthData;
 
 void* http_server_thread(void *arg) {
     AuthData *adata = (AuthData *)arg;
@@ -218,10 +233,14 @@ void* http_server_thread(void *arg) {
                     cJSON_IsNumber(expires_in_json)) {
                     pthread_mutex_lock(&spclient_mutex);
                     strncpy(spclient.access_token, access_token_json->valuestring, sizeof(spclient.access_token));
+                    spclient.access_token[sizeof(spclient.access_token) - 1] = '\0';
                     strncpy(spclient.refresh_token, refresh_token_json->valuestring, sizeof(spclient.refresh_token));
+                    spclient.refresh_token[sizeof(spclient.refresh_token) - 1] = '\0';
                     spclient.expiry = expires_in_json->valueint;
                     strncpy(spclient.client_id, adata->client_id, sizeof(spclient.client_id));
+                    spclient.client_id[sizeof(spclient.client_id) - 1] = '\0';
                     strncpy(spclient.client_secret, adata->client_secret, sizeof(spclient.client_secret));
+                    spclient.client_secret[sizeof(spclient.client_secret) - 1] = '\0';
                     pthread_mutex_unlock(&spclient_mutex);
 
                     pthread_mutex_lock(&logged_in_mutex);
@@ -249,7 +268,7 @@ bool spotify_request(const char *endpoint_base, const char *access_token) {
     char endpoint[512];
     pthread_mutex_lock(&spclient_mutex);
     if (strlen(spclient.current_playing_id) > 0) {
-        snprintf(endpoint, sizeof(endpoint), "%s?device=%s", endpoint_base, spclient.current_playing_id);
+        snprintf(endpoint, sizeof(endpoint), "%s?device_id=%s", endpoint_base, spclient.current_playing_id);
     } else {
         strncpy(endpoint, endpoint_base, sizeof(endpoint) - 1);
         endpoint[sizeof(endpoint) - 1] = '\0';
@@ -277,24 +296,6 @@ bool spotify_request(const char *endpoint_base, const char *access_token) {
 
     return (res == CURLE_OK);
 }
-
-// spotify client constructor from token
-// refresh token
-
-// get song
-// get volume
-// change volume
-// get playback state
-// get shuffle state
-// get liked state
-// set playback state
-// set shuffle state
-// set liked state
-// skip song
-// previous song
-// search
-// play
-// pause
 
 bool fetch_current_state(SongInfo *song) {
     CURL *curl = curl_easy_init();
@@ -333,7 +334,6 @@ bool fetch_current_state(SongInfo *song) {
 
     if (res != CURLE_OK || region.size == 0) {
         free(region.memory);
-        
         return false;
     }
 
@@ -346,8 +346,18 @@ bool fetch_current_state(SongInfo *song) {
     cJSON *err = cJSON_GetObjectItem(json, "error");
     if (err) {
         cJSON_Delete(json);
-
         return false;
+    }
+
+    cJSON *device_json = cJSON_GetObjectItem(json, "device");
+    if (device_json) {
+        cJSON *device_id_json = cJSON_GetObjectItem(json, "id");
+        if (cJSON_IsString(device_id_json)) {
+            pthread_mutex_lock(&spclient_mutex);
+            strncpy(spclient.current_playing_id, device_id_json->valuestring, sizeof(spclient.current_playing_id));
+            spclient.current_playing_id[sizeof(spclient.current_playing_id) - 1] = '\0';
+            pthread_mutex_unlock(&spclient_mutex);
+        }
     }
 
     cJSON *is_playing_json = cJSON_GetObjectItem(json, "is_playing");
@@ -363,6 +373,16 @@ bool fetch_current_state(SongInfo *song) {
         cJSON *title_json = cJSON_GetObjectItem(item, "name");
         if (cJSON_IsString(title_json)) {
             strncpy(song->title, title_json->valuestring, sizeof(song->title));
+            song->title[sizeof(song->title) - 1] = '\0';
+        }
+        
+        cJSON *track_id_json = cJSON_GetObjectItem(item, "id");
+        if (cJSON_IsString(track_id_json)) {
+            pthread_mutex_lock(&spclient_mutex);
+            strncpy(spclient.current_track_id, track_id_json->valuestring, 
+                sizeof(spclient.current_track_id));
+            spclient.current_track_id[sizeof(spclient.current_track_id) - 1] = '\0';
+            pthread_mutex_unlock(&spclient_mutex);
         }
 
         cJSON *duration_json = cJSON_GetObjectItem(item, "duration_ms");
@@ -373,6 +393,7 @@ bool fetch_current_state(SongInfo *song) {
             cJSON *album_name_json = cJSON_GetObjectItem(album, "name");
             if (cJSON_IsString(album_name_json)) {
                 strncpy(song->album, album_name_json->valuestring, sizeof(song->album));
+                song->album[sizeof(song->album) - 1] = '\0';
             }
 
             cJSON *images_json = cJSON_GetObjectItem(album, "images");
@@ -382,6 +403,7 @@ bool fetch_current_state(SongInfo *song) {
                     cJSON *image_url_json = cJSON_GetObjectItem(first_image, "url");
                     if (cJSON_IsString(image_url_json)) {
                         strncpy(song->url, image_url_json->valuestring, sizeof(song->url));
+                        song->url[sizeof(song->url) - 1] = '\0';
                     }
                 }
             }
@@ -394,11 +416,11 @@ bool fetch_current_state(SongInfo *song) {
                 cJSON *arist_name_json = cJSON_GetObjectItem(first_artist_json, "name");
                 if (cJSON_IsString(arist_name_json)) {
                     strncpy(song->artist, arist_name_json->valuestring, sizeof(song->artist));
+                    song->artist[sizeof(song->artist) - 1] = '\0';
                 }
             }
         }
     }
-
     cJSON_Delete(json);
 
     return true;
@@ -428,6 +450,7 @@ Texture2D load_album_art(const char *image_url) {
     if (res == CURLE_OK && imgBuffer.size > 0) {
         Image img = LoadImageFromMemory(".jpg", (unsigned char *)imgBuffer.memory, imgBuffer.size);
         if (img.data) {
+            ImageResize(&img, 160, 160);
             texture = LoadTextureFromImage(img);
             UnloadImage(img);
         }
@@ -435,6 +458,106 @@ Texture2D load_album_art(const char *image_url) {
 
     free(imgBuffer.memory);
     return texture;
+}
+
+void refresh_album_art() {
+    if (albumTexture.id != 0) {
+        UnloadTexture(albumTexture);
+        albumTexture = (Texture2D){0};
+    }
+}
+
+bool spotify_post(const char *endpoint_base, const char *access_token) {
+    char endpoint[512];
+    pthread_mutex_lock(&spclient_mutex);
+    if (strlen(spclient.current_playing_id) > 0) {
+        snprintf(endpoint, sizeof(endpoint), "%s?device_id=%s", endpoint_base, spclient.current_playing_id);
+    } else {
+        strncpy(endpoint, endpoint_base, sizeof(endpoint) - 1);
+        endpoint[sizeof(endpoint) - 1] = '\0';
+    }
+    pthread_mutex_unlock(&spclient_mutex);
+
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        return false;
+    }
+
+    struct curl_slist *headers = NULL;
+    char auth_header[256];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", access_token);
+    headers = curl_slist_append(headers, auth_header);
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    curl_easy_setopt(curl, CURLOPT_URL, endpoint);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+    long response_code = 0;
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, NULL);
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    return (res == CURLE_OK && response_code == 204);
+}
+
+void* network_thread(void *arg) {
+    NetCmdData *cmd = (NetCmdData *)arg;
+    if (!cmd) {
+        printf("Invalid NetCmdData in network_thread\n");
+        return NULL;
+    }
+
+    if (strlen(cmd->endpoint) >= sizeof(cmd->endpoint)) {
+        printf("Endpoint URL too long\n");
+        free(cmd);
+        return NULL;
+    }
+
+    if (strlen(cmd->access_token) >= sizeof(cmd->access_token)) {
+        printf("Access token too long\n");
+        free(cmd);
+        return NULL;
+    }
+
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        printf("Failed to initialize CURL\n");
+        free(cmd);
+        return NULL;
+    }
+
+    struct curl_slist *headers = NULL;
+    char auth_header[256];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", cmd->access_token);
+    headers = curl_slist_append(headers, auth_header);
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    curl_easy_setopt(curl, CURLOPT_URL, cmd->endpoint);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+
+    if (cmd->usePost) {
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "");
+    } else {
+        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+    }
+
+    long response_code = 0;
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, NULL);
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    // printf("Network request completed: %s, Response Code: %ld\n", cmd->endpoint, response_code);
+
+    free(cmd);
+    return NULL;
 }
 
 void handle_sigint(int sig) {
@@ -462,36 +585,84 @@ void buttonPressed(int gpio, int level, uint32_t tick) {
     lastTick = tick;
 
     if (level == PI_LOW) {
+        // printf("Button pressed: GPIO %d\n", gpio);
+        char access_token_copy[256];
+
+        NetCmdData *cmd = malloc(sizeof(NetCmdData));
+        if (!cmd) {
+            printf("Failed to allocate memory for NetCmdData\n");
+            return;
+        }
+
         pthread_mutex_lock(&spclient_mutex);
         bool current_playing = spclient.is_playing;
-        const char *access_token = spclient.access_token;
+        if (strlen(spclient.access_token) >= sizeof(cmd->access_token)) {
+            printf("Access token too long\n");
+            pthread_mutex_unlock(&spclient_mutex);
+            free(cmd);
+            return;
+        }
+        strncpy(access_token_copy, spclient.access_token, sizeof(access_token_copy));
+        access_token_copy[sizeof(access_token_copy) - 1] = '\0';
+
+        memset(cmd, 0, sizeof(NetCmdData));
+        strncpy(cmd->access_token, access_token_copy, sizeof(cmd->access_token));
+        cmd->access_token[sizeof(cmd->access_token) - 1] = '\0';
         pthread_mutex_unlock(&spclient_mutex);
 
+        const char* endpoint_url = NULL;
         switch (gpio) {
             case PP_BUTTON:
-                const char *endpoint_base = current_playing ?
+                endpoint_url = current_playing ?
                     "https://api.spotify.com/v1/me/player/pause" :
                     "https://api.spotify.com/v1/me/player/play";
-                bool success = spotify_request(endpoint_base, access_token);
-                if (success) {
-                    pthread_mutex_lock(&spclient_mutex);
-                    spclient.is_playing = !spclient.is_playing;
-                    pthread_mutex_unlock(&spclient_mutex);
-                }
+                cmd->usePost = false;
                 break;
 
             case SKIP_BUTTON:
-                printf("Skip Song\n");
+                endpoint_url = "https://api.spotify.com/v1/me/player/next";
+                cmd->usePost = true;
+                refresh_album_art();
+                fetch_current_state(&current_song);
+                // Load new album art immediately
+                if (strlen(current_song.url) > 0) {
+                    albumTexture = load_album_art(current_song.url);
+                }
                 break;
 
             case BACK_BUTTON:
-                printf("Previous Song\n");
+                endpoint_url = "https://api.spotify.com/v1/me/player/previous";
+                cmd->usePost = true;
+                refresh_album_art();
+                fetch_current_state(&current_song);
+                // Load new album art immediately
+                if (strlen(current_song.url) > 0) {
+                    albumTexture = load_album_art(current_song.url);
+                }
                 break;
 
             default:
+                printf("Unknown GPIO: %d\n", gpio);
+                free(cmd);
                 break;
         }
-        pthread_mutex_unlock(&spclient_mutex);
+
+        if (strlen(endpoint_url) >= sizeof(cmd->endpoint)) {
+            printf("Endpoint URL too long\n");
+            free(cmd);
+            return;
+        }
+        strncpy(cmd->endpoint, endpoint_url, sizeof(cmd->endpoint) - 1);
+        cmd->endpoint[sizeof(cmd->endpoint) - 1] = '\0';
+        // printf("Endpoint: %s\n", cmd->endpoint);
+
+        pthread_t net_thread;
+        if (pthread_create(&net_thread, NULL, network_thread, cmd) == 0) {
+            pthread_detach(net_thread);
+        } else {
+            printf("Failed to create network thread\n");
+            free(cmd);
+        }
     }
 }
 
@@ -544,8 +715,6 @@ void* gpio_thread_func(void* arg) {
     return NULL;
 }
 
-static Texture2D qrtexture = {0};
-
 AppState display_qr(AppState currentState) {
     // Center the QR texture on screen
     int texX = (SCREEN_WIDTH - qrtexture.width) / 2;
@@ -562,19 +731,34 @@ AppState display_qr(AppState currentState) {
     return currentState;
 }
 
-SongInfo current_song = {0};
-Texture2D albumTexture = {0};
-
 void display_app() {
     bool hasPlayback = fetch_current_state(&current_song);
+    static char prev_song_id[256] = {0};
+
     if (hasPlayback) {
+        pthread_mutex_lock(&spclient_mutex);
+        char current_track_id[256];
+        strncpy(current_track_id, spclient.current_track_id, sizeof(current_track_id));
+        current_track_id[sizeof(current_track_id) - 1] = '\0';
+        pthread_mutex_unlock(&spclient_mutex);
+
+        if (strcmp(current_track_id, prev_song_id) != 0) {
+            refresh_album_art();
+            strncpy(prev_song_id, current_track_id, sizeof(prev_song_id));
+            prev_song_id[sizeof(prev_song_id) - 1] = '\0';
+
+            if (strlen(current_song.url) > 0) {
+                albumTexture = load_album_art(current_song.url);
+            }
+        }
+
         if (strlen(current_song.url) > 0 && albumTexture.id == 0) {
             albumTexture = load_album_art(current_song.url);
         }
 
         if (albumTexture.id != 0) {
-            int imgX = (SCREEN_WIDTH - albumTexture.width) / 2;
-            DrawTexture(albumTexture, imgX, 0, WHITE);
+            DrawTexture(albumTexture, (SCREEN_WIDTH - albumTexture.width) / 2, 
+                (SCREEN_HEIGHT - albumTexture.height) / 2, WHITE);
         }
 
         char infoText[256];
@@ -592,7 +776,7 @@ void display_app() {
             const char *access_token = spclient.access_token;
             const char *endpoint = current_playing ?
                 "https://api.spotify.com/v1/me/player/pause" : "https://api.spotify.com/v1/me/player/play";
-            if (spotify_request(endpoint, spclient.access_token)) {
+            if (spotify_request(endpoint, access_token)) {
                 pthread_mutex_lock(&spclient_mutex);
                 spclient.is_playing = !spclient.is_playing;
                 pthread_mutex_unlock(&spclient_mutex);
@@ -603,35 +787,9 @@ void display_app() {
         DrawText("No active Spotify device found.\nPlease open Spotify on a device.", 
                  SCREEN_WIDTH/2 - 150, SCREEN_HEIGHT/2 - 40, 20, WHITE);
         if (GuiButton((Rectangle){SCREEN_WIDTH/2 - 50, SCREEN_HEIGHT/2 + 20, 100, 40}, "Refresh")) {
-            // Clear previous album texture so that if playback is now active, we reload the album art.
-            if (albumTexture.id != 0) {
-                UnloadTexture(albumTexture);
-                albumTexture = (Texture2D){0};
-            }
-            // Optionally, you could call fetch_current_playback() immediately here.
+            refresh_album_art();
         }
     }
- 
-    /*
-    bool current_playing;
-    pthread_mutex_lock(&spclient_mutex);
-    current_playing = spclient.is_playing;
-    pthread_mutex_unlock(&spclient_mutex);
-
-    if (GuiButton((Rectangle){ 85, 70, 250, 100 }, spclient.is_playing ? "Pause" : "Play")) {
-        const char *access_token = spclient.access_token;
-        const char *endpoint = current_playing ? 
-        "https://api.spotify.com/v1/me/player/pause" : "https://api.spotify.com/v1/me/player/play";
-                    
-        bool success = spotify_request(endpoint, access_token);
-        if (success) {
-            pthread_mutex_lock(&spclient_mutex);
-            spclient.is_playing = !spclient.is_playing;
-            pthread_mutex_unlock(&spclient_mutex);
-        }
-    }
-    */
- 
 }
 
 int main() {
@@ -722,7 +880,9 @@ int main() {
                     if (strlen(client_id) > 0 && strlen(client_secret) > 0) {
                         AuthData *adata = malloc(sizeof(AuthData));
                         strncpy(adata->client_id, client_id, sizeof(adata->client_id));
+                        adata->client_id[sizeof(adata->client_id) - 1] = '\0';
                         strncpy(adata->client_secret, client_secret, sizeof(adata->client_secret));
+                        adata->client_secret[sizeof(adata->client_secret) - 1] = '\0';
                         strcpy(adata->redirect_uri, "http://192.168.1.198:8889/callback");
 
                         srand(time(NULL));
