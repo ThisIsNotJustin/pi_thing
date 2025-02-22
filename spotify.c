@@ -104,12 +104,34 @@ typedef struct {
     char access_token[256];
 } NetCmdData;
 
+typedef struct { 
+    Texture2D play;
+    Texture2D pause;
+    Texture2D skip;
+    Texture2D prev;
+    // white/green
+    Texture2D shuffle;
+    // normal size for it being liked and for unliked do 
+    // normal size then a smaller scaled heart thats transparent
+    // it'll look unfilled and liked will look filled
+    Texture2D like; 
+} UITextures;
+
+typedef struct {
+    Rectangle play_pause;
+    Rectangle shuffle;
+    Rectangle skip;
+    Rectangle prev;
+    Rectangle like;
+} ControlsRegion;
+
 SpotifyClient spclient;
 pthread_mutex_t spclient_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t logged_in_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 SongInfo current_song = {0};
 Texture2D albumTexture = {0};
+UITextures ui_textures = {0};
 
 static Texture2D qrtexture = {0};
 static Texture2D shuffle_texture = {0};
@@ -512,8 +534,9 @@ bool spotify_post(const char *endpoint_base, const char *access_token) {
     headers = curl_slist_append(headers, "Content-Type: application/json");
 
     curl_easy_setopt(curl, CURLOPT_URL, endpoint);
-    curl_easy_setopt(curl, CURLOPT_POST, 1L);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "");
 
     long response_code = 0;
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, NULL);
@@ -580,6 +603,35 @@ void* network_thread(void *arg) {
 
     free(cmd);
     return NULL;
+}
+
+bool load_ui() {
+    Image img;
+    img = LoadImage("assets/play.png");
+    ui_textures.play = LoadTextureFromImage(img);
+    UnloadImage(img);
+
+    img = LoadImage("assets/pause.png");
+    ui_textures.pause = LoadTextureFromImage(img);
+    UnloadImage(img);
+
+    img = LoadImage("assets/skip.png");
+    ui_textures.skip = LoadTextureFromImage(img);
+    UnloadImage(img);
+
+    img = LoadImage("assets/prev.png");
+    ui_textures.prev = LoadTextureFromImage(img);
+    UnloadImage(img);
+
+    img = LoadImage("assets/like.png");
+    ui_textures.shuffle = LoadTextureFromImage(img);
+    UnloadImage(img);
+
+    img = LoadImage("assets/shuffle.png");
+    ui_textures.like = LoadTextureFromImage(img);
+    UnloadImage(img);
+
+    return true;
 }
 
 void handle_sigint(int sig) {
@@ -754,8 +806,31 @@ AppState display_qr(AppState currentState) {
 }
 
 void display_app() {
+    static SongInfo cached_song = {0};
+    static bool cached_is_playing = false;
+    static bool cached_is_shuffle = false;
+    static bool cached_is_liked = false;
+    static ControlsRegion controls = {
+        .shuffle = {40, SCREEN_HEIGHT - 66, 32, 32},
+        .prev = {212, SCREEN_HEIGHT - 66, 32, 32},
+        .play_pause = {384, SCREEN_HEIGHT - 66, 32, 30},
+        .skip = {556, SCREEN_HEIGHT - 66, 32, 32},
+        .like = {SCREEN_WIDTH - 40 - 32, SCREEN_HEIGHT - 66, 32, 32}
+    };
+
+    Vector2 mouse_pos = GetMousePosition();
+    bool clicked = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+    bool tapped = false;
+    // absolutely no idea if this works
+    Vector2 touch_pos;
+    if (GetTouchPointCount() > 0) {
+        touch_pos = GetTouchPosition(0);
+        tapped = true;
+    }
+
     bool hasPlayback = fetch_current_state(&current_song);
     static char prev_song_id[256] = {0};
+    bool should_refresh = false;
 
     if (hasPlayback) {
         pthread_mutex_lock(&spclient_mutex);
@@ -790,40 +865,90 @@ void display_app() {
         float progress_ratio = (current_song.duration > 0) ? (float)current_song.progress / current_song.duration : 0;
         GuiProgressBar((Rectangle){ 0, SCREEN_HEIGHT - 100, SCREEN_WIDTH, 2 }, "", "", &progress_ratio, 0, 1);
         
-        bool is_shuffle;
-        bool current_playing;
-        pthread_mutex_lock(&spclient_mutex);
-        current_playing = spclient.is_playing;
-        is_shuffle = spclient.shuffle;
-        pthread_mutex_unlock(&spclient_mutex);
+        // Draw control buttons
+        DrawTextureEx(cached_is_playing ? ui_textures.pause : ui_textures.play, 
+            (Vector2){controls.play_pause.x, controls.play_pause.y}, 0.0f, 0.5f, WHITE);
+        
+        DrawTextureEx(ui_textures.shuffle, (Vector2){controls.shuffle.x, controls.shuffle.y}, 
+            0.0f, 0.5f, cached_is_shuffle ? GREEN : WHITE);
+        
+        DrawTextureEx(ui_textures.skip, (Vector2){controls.skip.x, controls.skip.y}, 0.0f, 0.5f, WHITE);
+        DrawTextureEx(ui_textures.prev, (Vector2){controls.prev.x, controls.prev.y}, 0.0f, 0.5f, WHITE);
 
-        // printf("Working dir: %s\n", GetWorkingDirectory());
-        Image shuffle_png = LoadImage("assets/shuffle.png");
-        shuffle_texture = LoadTextureFromImage(shuffle_png);
-        UnloadImage(shuffle_png);
+        DrawTextureEx(ui_textures.like, (Vector2){controls.like.x, controls.like.y}, 0.0f, 0.5f, WHITE);
 
-        if (is_shuffle) {
-            DrawTexture(shuffle_texture, 50 + shuffle_texture.width + 10, SCREEN_HEIGHT - 80, GREEN);
-        } else {
-            DrawTextureEx(shuffle_texture, (Vector2){ 50 + 100 + shuffle_texture.width + 10, SCREEN_HEIGHT - 66 }, 0.0f, 0.5f, GREEN);
+        if (clicked || tapped) {
+            const char* endpoint_url = NULL;
+            if (CheckCollisionPointRec(mouse_pos, controls.play_pause) || 
+                    CheckCollisionPointRec(touch_pos, controls.play_pause)) {
+                pthread_mutex_lock(&spclient_mutex);
+                endpoint_url = cached_is_playing ?
+                    "https://api.spotify.com/v1/me/player/pause" : 
+                    "https://api.spotify.com/v1/me/player/play";
+                if (spotify_request(endpoint_url, spclient.access_token)) {
+                    spclient.is_playing = !spclient.is_playing;
+                    cached_is_playing = spclient.is_playing;
+                    should_refresh = true;
+                }
+
+                pthread_mutex_unlock(&spclient_mutex);
+            } else if (CheckCollisionPointRec(mouse_pos, controls.skip) || 
+                    CheckCollisionPointRec(touch_pos, controls.skip)) {
+                pthread_mutex_lock(&spclient_mutex);
+                endpoint_url = "https://api.spotify.com/v1/me/player/next";
+                if (spotify_post(endpoint_url, spclient.access_token)) {
+                    should_refresh = true;
+                }
+        
+                pthread_mutex_unlock(&spclient_mutex);
+            } else if (CheckCollisionPointRec(mouse_pos, controls.prev) || 
+                    CheckCollisionPointRec(touch_pos, controls.prev)) {
+                pthread_mutex_lock(&spclient_mutex);
+                endpoint_url = "https://api.spotify.com/v1/me/player/previous";
+                if (spotify_post(endpoint_url, spclient.access_token)) {
+                    should_refresh = true;
+                }
+        
+                pthread_mutex_unlock(&spclient_mutex);
+            } else if (CheckCollisionPointRec(mouse_pos, controls.like) || 
+                    CheckCollisionPointRec(touch_pos, controls.like)) {
+                pthread_mutex_lock(&spclient_mutex);
+                /*
+                endpoint_url = "https://api.spotify.com/v1/me/tracks";
+                if (spotify_request(endpoint_url, spclient.access_token)) {
+                    // set a song to be liked?
+                    should_refresh = true;
+                }
+                */
+                pthread_mutex_unlock(&spclient_mutex);
+            } else if (CheckCollisionPointRec(mouse_pos, controls.shuffle) || 
+                    CheckCollisionPointRec(touch_pos, controls.shuffle)) {
+                pthread_mutex_lock(&spclient_mutex);
+                const char *endpoint = "https://api.spotify.com/v1/me/player/shuffle";
+                if (spotify_request(endpoint, spclient.access_token)) {
+                    spclient.shuffle = !spclient.shuffle;
+                    cached_is_shuffle = spclient.shuffle;
+                    should_refresh = true;
+                }
+            }
         }
 
-        if (GuiButton((Rectangle){ 50, SCREEN_HEIGHT - 65, 100, 30 }, spclient.is_playing ? "Pause" : "Play")) {
-            const char *access_token = spclient.access_token;
-            const char *endpoint = current_playing ?
-                "https://api.spotify.com/v1/me/player/pause" : "https://api.spotify.com/v1/me/player/play";
-            if (spotify_request(endpoint, access_token)) {
-                pthread_mutex_lock(&spclient_mutex);
-                spclient.is_playing = !spclient.is_playing;
-                pthread_mutex_unlock(&spclient_mutex);
-            }
+        if (should_refresh) {
+            fetch_current_state(&current_song);
+            memcpy(&cached_song, &current_song, sizeof(SongInfo));
+            // do we need refresh album art here or even:
+            // // Load new album art immediately
+            // if (strlen(current_song.url) > 0) {
+            //     albumTexture = load_album_art(current_song.url);
+            // }
         }
     } else {
         // No active playback found, display a prompt and a refresh button.
         DrawText("No active Spotify device found.\nPlease open Spotify on a device.", 
                  SCREEN_WIDTH/2 - 150, SCREEN_HEIGHT/2 - 40, 20, WHITE);
         if (GuiButton((Rectangle){SCREEN_WIDTH/2 - 50, SCREEN_HEIGHT/2 + 20, 100, 40}, "Refresh")) {
-            refresh_album_art();
+            fetch_current_state(&current_song);
+            memcpy(&cached_song, &current_song, sizeof(SongInfo));
         }
     }
 }
@@ -849,6 +974,11 @@ int main() {
     char auth_url[1024] = {0};
 
     AppState currentState = STATE_LOGIN;
+
+    if (!load_ui()) {
+        fprintf(stderr, "Failed to load UI assets\n");
+        return 1;
+    }
 
     while (!WindowShouldClose() && running) {
         if (IsKeyPressed(KEY_ESCAPE)) {
@@ -991,10 +1121,25 @@ int main() {
         UnloadTexture(qrtexture);
     }
 
-    if (shuffle_texture.id != 0) {
-        UnloadTexture(shuffle_texture);
+    if (ui_textures.play.id != 0) {
+        UnloadTexture(ui_textures.play);
     }
 
+    if (ui_textures.pause.id != 0) {
+        UnloadTexture(ui_textures.pause);
+    }
+    if (ui_textures.skip.id != 0) {
+        UnloadTexture(ui_textures.skip);
+    }
+    if (ui_textures.prev.id != 0) {
+        UnloadTexture(ui_textures.prev);
+    }
+    if (ui_textures.shuffle.id != 0) {
+        UnloadTexture(ui_textures.shuffle);
+    }
+    if (ui_textures.like.id != 0) {
+        UnloadTexture(ui_textures.like);
+    }
     CloseWindow();
 
     return 0;
