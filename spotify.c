@@ -891,6 +891,7 @@ void display_app() {
         char current_track_id[256];
         strncpy(current_track_id, spclient.current_track_id, sizeof(current_track_id) - 1);
         current_track_id[sizeof(current_track_id) - 1] = '\0';
+        cached_is_playing = spclient.is_playing;
         pthread_mutex_unlock(&spclient_mutex);
 
         if (strcmp(current_track_id, prev_song_id) != 0) {
