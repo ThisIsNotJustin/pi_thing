@@ -47,6 +47,7 @@
 
 #define SCREEN_WIDTH 800
 #define SCREEN_HEIGHT 480
+#define PADDING 40
 
 volatile int running = 1;
 volatile bool logged_in = false;
@@ -494,7 +495,7 @@ Texture2D load_album_art(const char *image_url) {
     if (res == CURLE_OK && imgBuffer.size > 0) {
         Image img = LoadImageFromMemory(".jpg", (unsigned char *)imgBuffer.memory, imgBuffer.size);
         if (img.data) {
-            ImageResize(&img, 160, 160);
+            ImageResize(&img, 256, 256);
             texture = LoadTextureFromImage(img);
             UnloadImage(img);
         }
@@ -794,7 +795,8 @@ AppState display_qr(AppState currentState) {
     int texX = (SCREEN_WIDTH - qrtexture.width) / 2;
     int texY = (SCREEN_HEIGHT - qrtexture.height) / 2;
     DrawTexture(qrtexture, texX, texY, WHITE);
-    DrawText("Scan QR Code!", SCREEN_WIDTH/2 - 70, texY - 30, 20, WHITE);
+    // Centering passed the "good enough" on the eye test
+    DrawText("Scan QR Code to Connect with Spotify!", SCREEN_WIDTH/2 - 200, texY - 30, 20, WHITE);
 
     pthread_mutex_lock(&logged_in_mutex);
     if (logged_in) {
@@ -805,17 +807,36 @@ AppState display_qr(AppState currentState) {
     return currentState;
 }
 
+void truncate_text(char *output, const char *input, int max_width, int fontsize) {
+    size_t length = strlen(input);
+    char temp[128];
+    if (MeasureText(input, fontsize) <= max_width) {
+        snprintf(output, sizeof(temp), "%s", input);
+        return;
+    }
+
+    for (size_t i = length - 1; i > 0; i--) {
+        snprintf(temp, i, "%s", input);
+        if (MeasureText(temp, fontsize) <= max_width) {
+            snprintf(output, sizeof(temp), "%s..", temp);
+            return;
+        }
+    }
+}
+
 void display_app() {
+    DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - 100, Fade(BLACK, 0.7f));
+
     static SongInfo cached_song = {0};
     static bool cached_is_playing = false;
     static bool cached_is_shuffle = false;
     static bool cached_is_liked = false;
     static ControlsRegion controls = {
-        .shuffle = {40, SCREEN_HEIGHT - 66, 32, 32},
+        .shuffle = {SCREEN_WIDTH - PADDING - 32, SCREEN_HEIGHT - 66, 32, 32},
         .prev = {212, SCREEN_HEIGHT - 66, 32, 32},
         .play_pause = {384, SCREEN_HEIGHT - 66, 32, 30},
         .skip = {556, SCREEN_HEIGHT - 66, 32, 32},
-        .like = {SCREEN_WIDTH - 40 - 32, SCREEN_HEIGHT - 66, 32, 32}
+        .like = {PADDING, SCREEN_HEIGHT - 66, 32, 32}
     };
 
     Vector2 mouse_pos = GetMousePosition();
@@ -854,17 +875,24 @@ void display_app() {
         }
 
         if (albumTexture.id != 0) {
-            DrawTexture(albumTexture, (SCREEN_WIDTH - albumTexture.width) / 2, 
-                (SCREEN_HEIGHT - albumTexture.height) / 2, WHITE);
+            DrawTexture(albumTexture, PADDING, ((SCREEN_HEIGHT - albumTexture.height) / 2) - PADDING, WHITE);
         }
 
-        char infoText[256];
-        snprintf(infoText, sizeof(infoText), "%s - %s", current_song.title, current_song.artist);
-        DrawText(infoText, 50, SCREEN_HEIGHT - 120, 20, WHITE);
+        char title_text[128];
+        char artist_text[128];
+        truncate_text(title_text, current_song.title, 400, 44);
+        // snprintf(title_text, sizeof(title_text), "%s", current_song.title);
+        DrawText(title_text, (2 * PADDING) + albumTexture.width, 70, 44, WHITE);
+        // int measurement = MeasureText(title_text, 44);
+        // printf("measurement: %d\n", measurement);
+        snprintf(artist_text, sizeof(artist_text), "%s", current_song.artist);
+        DrawText(artist_text, (2 * PADDING) + albumTexture.width, 70 + 22 + PADDING, 26, WHITE);
 
         float progress_ratio = (current_song.duration > 0) ? (float)current_song.progress / current_song.duration : 0;
         GuiProgressBar((Rectangle){ 0, SCREEN_HEIGHT - 100, SCREEN_WIDTH, 2 }, "", "", &progress_ratio, 0, 1);
         
+        DrawRectangle(0, SCREEN_HEIGHT - 98, SCREEN_WIDTH, 98, Fade(BLACK, 0.85f));
+
         // Draw control buttons
         DrawTextureEx(cached_is_playing ? ui_textures.pause : ui_textures.play, 
             (Vector2){controls.play_pause.x, controls.play_pause.y}, 0.0f, 0.5f, WHITE);
@@ -914,6 +942,8 @@ void display_app() {
                     CheckCollisionPointRec(touch_pos, controls.like)) {
                 pthread_mutex_lock(&spclient_mutex);
                 /*
+                implement liking
+
                 endpoint_url = "https://api.spotify.com/v1/me/tracks";
                 if (spotify_request(endpoint_url, spclient.access_token)) {
                     // set a song to be liked?
@@ -936,17 +966,19 @@ void display_app() {
         if (should_refresh) {
             fetch_current_state(&current_song);
             memcpy(&cached_song, &current_song, sizeof(SongInfo));
-            // do we need refresh album art here or even:
+            // do we need refresh album art here? or even:
             // // Load new album art immediately
             // if (strlen(current_song.url) > 0) {
             //     albumTexture = load_album_art(current_song.url);
             // }
+            // 
+            // seems like no but not 100% sure
         }
     } else {
         // No active playback found, display a prompt and a refresh button.
         DrawText("No active Spotify device found.\nPlease open Spotify on a device.", 
-                 SCREEN_WIDTH/2 - 150, SCREEN_HEIGHT/2 - 40, 20, WHITE);
-        if (GuiButton((Rectangle){SCREEN_WIDTH/2 - 50, SCREEN_HEIGHT/2 + 20, 100, 40}, "Refresh")) {
+                 SCREEN_WIDTH/2 - 150, SCREEN_HEIGHT/2 - PADDING, 20, WHITE);
+        if (GuiButton((Rectangle){SCREEN_WIDTH/2 - 50, SCREEN_HEIGHT/2 + 20, 100, PADDING}, "Refresh")) {
             fetch_current_state(&current_song);
             memcpy(&cached_song, &current_song, sizeof(SongInfo));
         }
@@ -1027,6 +1059,7 @@ int main() {
                 // temp for speeding up development
                 // auto inserts client id and secret (replace xxxx)
                 // !not for production!
+                /*
                 if (GuiLabelButton((Rectangle){SCREEN_WIDTH/2 - 125, SCREEN_HEIGHT/2 + 50, 50, 50}, "Auto")) {
                     strncpy(client_id, "xxxx", sizeof(client_id));
                     client_id[sizeof(client_id) - 1] = '\0';
@@ -1034,6 +1067,7 @@ int main() {
                     strncpy(client_secret, "xxxx", sizeof(client_secret));
                     client_secret[sizeof(client_secret) - 1] = '\0';
                 }
+                */
 
                 // once we have input for client id and secret
                 // login with spotify button becomes clickable
@@ -1042,7 +1076,7 @@ int main() {
                 // if client id and secret align with spotify account
                 // spotify pi thing app opens
                 // should be about centered
-                if (GuiButton((Rectangle){SCREEN_WIDTH/2 - 125, SCREEN_HEIGHT/2, 250, 40}, "Login with Spotify")) {
+                if (GuiButton((Rectangle){SCREEN_WIDTH/2 - 125, SCREEN_HEIGHT/2, 250, PADDING}, "Login with Spotify")) {
                     if (strlen(client_id) > 0 && strlen(client_secret) > 0) {
                         AuthData *adata = malloc(sizeof(AuthData));
                         strncpy(adata->client_id, client_id, sizeof(adata->client_id));
@@ -1123,21 +1157,10 @@ int main() {
 
     if (ui_textures.play.id != 0) {
         UnloadTexture(ui_textures.play);
-    }
-
-    if (ui_textures.pause.id != 0) {
         UnloadTexture(ui_textures.pause);
-    }
-    if (ui_textures.skip.id != 0) {
         UnloadTexture(ui_textures.skip);
-    }
-    if (ui_textures.prev.id != 0) {
         UnloadTexture(ui_textures.prev);
-    }
-    if (ui_textures.shuffle.id != 0) {
         UnloadTexture(ui_textures.shuffle);
-    }
-    if (ui_textures.like.id != 0) {
         UnloadTexture(ui_textures.like);
     }
     CloseWindow();
