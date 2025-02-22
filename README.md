@@ -2,9 +2,11 @@
 
 ## Overview
 
-Pi Thing is a Raspberry Pi Zero 2 W-based recreation of the now discontinued Spotify Car Thing.
+Pi Thing is a Raspberry Pi Zero 2 W based recreation of the now discontinued Spotify Car Thing.
 It provides a touchscreen interface and physical button controls for interacting with Spotify playback via the `Spotify API`.
-The project is developed in C, utilizing the `pigpio` library for GPIO handling and `raygui` for the user interface.
+The project is developed in C, utilizing the `pigpio` library for GPIO handling and `raygui`/`raylib` for the user interface.
+
+## Demo
 
 ## Features
 
@@ -28,22 +30,24 @@ The project is developed in C, utilizing the `pigpio` library for GPIO handling 
 
 - **C Compiler** (e.g., `gcc`)
 - **pigpio** (for GPIO handling)
-- **raygui** (for UI development)
+- **raylib** (for UI development in C)
+    - **raygui** 
 - **Spotify API** (for playback control)
-- **libcurl** (for API requests to Spotify)
+- **cJSON** (seamless JSON parsing with C)
+- **libcurl** (for API requests to Spotify with C)
 
 ## Spotify API Setup
 
 1. Create a Spotify Developer account.
 2. Register a new application in the Spotify Developer Dashboard.
 3. Obtain the **Client ID** and **Client Secret**.
-4. Implement OAuth authentication for playback control.
+4. Enter these when starting the Pi Thing app!
 
 ## Usage
 
-- Use the touchscreen UI to browse and play music.
+- Use the touchscreen UI to browse and control music playback on another device with Spotify open.
 - Physical buttons allow quick control of playback.
-- The potentiometer adjusts the volume.
+- The potentiometer adjusts the volume and allows for easy scrolling through playlists.
 
 ## License
 
