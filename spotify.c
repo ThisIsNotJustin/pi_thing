@@ -112,6 +112,7 @@ SongInfo current_song = {0};
 Texture2D albumTexture = {0};
 
 static Texture2D qrtexture = {0};
+static Texture2D shuffle_texture = {0};
 
 size_t write_callback(void *content, size_t size, size_t n, void *user) {
     size_t realsize = size * n;
@@ -787,13 +788,27 @@ void display_app() {
         DrawText(infoText, 50, SCREEN_HEIGHT - 120, 20, WHITE);
 
         float progress_ratio = (current_song.duration > 0) ? (float)current_song.progress / current_song.duration : 0;
-        GuiProgressBar((Rectangle){ 50, SCREEN_HEIGHT - 80, SCREEN_WIDTH - 100, 30 }, "", "", &progress_ratio, 0, 1);
+        GuiProgressBar((Rectangle){ 0, SCREEN_HEIGHT - 100, SCREEN_WIDTH, 2 }, "", "", &progress_ratio, 0, 1);
+        
+        bool is_shuffle;
         bool current_playing;
         pthread_mutex_lock(&spclient_mutex);
         current_playing = spclient.is_playing;
+        is_shuffle = spclient.shuffle;
         pthread_mutex_unlock(&spclient_mutex);
 
-        if (GuiButton((Rectangle){ 50, SCREEN_HEIGHT - 40, 100, 30 }, spclient.is_playing ? "Pause" : "Play")) {
+        // printf("Working dir: %s\n", GetWorkingDirectory());
+        Image shuffle_png = LoadImage("assets/shuffle.png");
+        shuffle_texture = LoadTextureFromImage(shuffle_png);
+        UnloadImage(shuffle_png);
+
+        if (is_shuffle) {
+            DrawTexture(shuffle_texture, 50 + shuffle_texture.width + 10, SCREEN_HEIGHT - 80, GREEN);
+        } else {
+            DrawTextureEx(shuffle_texture, (Vector2){ 50 + 100 + shuffle_texture.width + 10, SCREEN_HEIGHT - 66 }, 0.0f, 0.5f, GREEN);
+        }
+
+        if (GuiButton((Rectangle){ 50, SCREEN_HEIGHT - 65, 100, 30 }, spclient.is_playing ? "Pause" : "Play")) {
             const char *access_token = spclient.access_token;
             const char *endpoint = current_playing ?
                 "https://api.spotify.com/v1/me/player/pause" : "https://api.spotify.com/v1/me/player/play";
@@ -883,10 +898,10 @@ int main() {
                 // auto inserts client id and secret (replace xxxx)
                 // !not for production!
                 if (GuiLabelButton((Rectangle){SCREEN_WIDTH/2 - 125, SCREEN_HEIGHT/2 + 50, 50, 50}, "Auto")) {
-                    strncpy(client_id, "4f3a06ce42164770914c78489a8bd5cf", sizeof(client_id));
+                    strncpy(client_id, "xxxx", sizeof(client_id));
                     client_id[sizeof(client_id) - 1] = '\0';
 
-                    strncpy(client_secret, "51bca4d43abb41f1873bf1f22827d364", sizeof(client_secret));
+                    strncpy(client_secret, "xxxx", sizeof(client_secret));
                     client_secret[sizeof(client_secret) - 1] = '\0';
                 }
 
@@ -975,6 +990,11 @@ int main() {
     if (qrtexture.id != 0) {
         UnloadTexture(qrtexture);
     }
+
+    if (shuffle_texture.id != 0) {
+        UnloadTexture(shuffle_texture);
+    }
+
     CloseWindow();
 
     return 0;
