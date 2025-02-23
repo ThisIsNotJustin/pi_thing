@@ -111,6 +111,7 @@ typedef struct {
 
 typedef struct { 
     Texture2D back;
+    Texture2D music;
     Texture2D play;
     Texture2D pause;
     Texture2D skip;
@@ -123,12 +124,14 @@ typedef struct {
 
 typedef struct {
     Rectangle back;
+    Rectangle music;
     Rectangle play_pause;
     Rectangle shuffle;
     Rectangle skip;
     Rectangle prev;
     Rectangle like;
     bool back_pressed;
+    bool music_pressed;
     bool play_pause_pressed;
     bool shuffle_pressed;
     bool skip_pressed;
@@ -622,6 +625,10 @@ bool load_ui() {
     ui_textures.back = LoadTextureFromImage(img);
     UnloadImage(img);
 
+    img = LoadImage("assets/music.png");
+    ui_textures.music = LoadTextureFromImage(img);
+    UnloadImage(img);
+
     img = LoadImage("assets/play.png");
     ui_textures.play = LoadTextureFromImage(img);
     UnloadImage(img);
@@ -848,6 +855,7 @@ void truncate_text(char *output, const char *input, int max_width, int fontsize)
 
 static ControlsRegion controls = {
     .back = {SCREEN_WIDTH - PADDING - 32, PADDING, 32, 32},
+    .music = {SCREEN_WIDTH - PADDING - 32, PADDING, 32, 32},
     .shuffle = {PADDING, SCREEN_HEIGHT - 66, 32, 32},
     .prev = {212, SCREEN_HEIGHT - 66, 32, 32},
     .play_pause = {384, SCREEN_HEIGHT - 66, 32, 30},
@@ -861,7 +869,7 @@ static ControlsRegion controls = {
     .like_pressed = false,
 };
 
-void display_home(AppState current_state) {
+AppState display_home(AppState current_state) {
     DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Fade(BLACK, 0.7f));
 
     Vector2 mouse_pos = GetMousePosition();
@@ -874,22 +882,24 @@ void display_home(AppState current_state) {
         tapped = true;
     }
 
-    DrawTextureEx(ui_textures.back, (Vector2){controls.back.x, controls.back.y}, 0.0f, 
-        controls.back_pressed ? 0.45f : 0.5f, controls.back_pressed ? GRAY : WHITE
+    DrawTextureEx(ui_textures.music, (Vector2){controls.music.x, controls.music.y}, 0.0f, 
+        controls.music_pressed ? 0.45f : 0.5f, controls.music_pressed ? GRAY : WHITE
     );
 
     if (clicked || tapped) {
         Vector2 input_pos = clicked ? mouse_pos : touch_pos;
-        controls.back_pressed = false;
+        controls.music_pressed = false;
 
-        if (CheckCollisionPointRec(input_pos, controls.back)) {
-            controls.back_pressed = true;
+        if (CheckCollisionPointRec(input_pos, controls.music)) {
+            controls.music_pressed = true;
             current_state = STATE_APP_MUSIC;
         }
     }
+
+    return current_state;
 }
 
-void display_library(AppState current_state) {
+AppState display_library(AppState current_state) {
     DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Fade(BLACK, 0.7f));
 
     Vector2 mouse_pos = GetMousePosition();
@@ -902,22 +912,24 @@ void display_library(AppState current_state) {
         tapped = true;
     }
 
-    DrawTextureEx(ui_textures.back, (Vector2){controls.back.x, controls.back.y}, 0.0f, 
-        controls.back_pressed ? 0.45f : 0.5f, controls.back_pressed ? GRAY : WHITE
+    DrawTextureEx(ui_textures.music, (Vector2){controls.music.x, controls.music.y}, 0.0f, 
+        controls.music_pressed ? 0.45f : 0.5f, controls.music_pressed ? GRAY : WHITE
     );
 
     if (clicked || tapped) {
         Vector2 input_pos = clicked ? mouse_pos : touch_pos;
-        controls.back_pressed = false;
+        controls.music_pressed = false;
 
-        if (CheckCollisionPointRec(input_pos, controls.back)) {
-            controls.back_pressed = true;
+        if (CheckCollisionPointRec(input_pos, controls.music)) {
+            controls.music_pressed = true;
             current_state = STATE_APP_MUSIC;
         }
     }
+
+    return current_state;
 }
 
-void display_app(AppState current_state) {
+AppState display_app(AppState current_state) {
     DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - 100, Fade(BLACK, 0.7f));
 
     pthread_mutex_lock(&album_art_mutex);
@@ -1091,7 +1103,7 @@ void display_app(AppState current_state) {
                 }
             } else if (CheckCollisionPointRec(input_pos, controls.back)) {
                 controls.back_pressed = true;
-                current_state = STATE_APP_HOME;
+                return STATE_APP_HOME;
             }
         }
 
@@ -1115,6 +1127,8 @@ void display_app(AppState current_state) {
             memcpy(&cached_song, &current_song, sizeof(SongInfo));
         }
     }
+
+    return current_state;
 }
 
 int main() {
@@ -1274,15 +1288,15 @@ int main() {
                 break;
 
             case STATE_APP_HOME:
-                display_home(current_state);
+                current_state = display_home(current_state);
                 break;
 
             case STATE_APP_LIBRARY:
-                display_library(current_state);
+                current_state = display_library(current_state);
                 break;
 
             case STATE_APP_MUSIC:
-                display_app(current_state);
+                current_state = display_app(current_state);
                 break;
         }
 
