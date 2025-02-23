@@ -868,8 +868,8 @@ void truncate_text(char *output, const char *input, int max_width, int fontsize)
 }
 
 static ControlsRegion controls = {
-    .home = {PADDING, PADDING, 32, 32},
-    .library = {2 * PADDING + 32, PADDING, 32, 32},
+    .home = {PADDING, PADDING, 84, 32},
+    .library = {3 * PADDING + 32, PADDING, 112, 32},
     .back = {SCREEN_WIDTH - PADDING - 32, PADDING, 32, 32},
     .music = {SCREEN_WIDTH - PADDING - 32, PADDING, 32, 32},
     .shuffle = {PADDING, SCREEN_HEIGHT - 66, 32, 32},
@@ -889,18 +889,33 @@ static ControlsRegion controls = {
 };
 
 void display_top_nav(bool is_home) {
+    // int home_length = MeasureText("Home", 22);
+    // int library_length = MeasureText("Library", 22);
+
     DrawTextureEx(ui_textures.home, (Vector2){controls.home.x, controls.home.y}, 0.0f,
         controls.home_pressed ? 0.9f : 1.0f, (is_home && controls.home_pressed ? 
-            DARKGRAY : (is_home ? GRAY : WHITE))
+        DARKGRAY : (is_home ? WHITE : GRAY))
     );
+    DrawText("Home", PADDING + 32 + 10, PADDING + 12, 22, (is_home && controls.home_pressed ? 
+        DARKGRAY : (is_home ? WHITE : GRAY))
+    );
+    // adding length of this number to the controls region for controls.home
+    // this makes the text be "clickable" with the icon
+    // printf("Home length: %d\n", home_length);
 
     DrawTextureEx(ui_textures.library, (Vector2){controls.library.x, controls.library.y}, 0.0f,
         controls.library_pressed ? 0.9f : 1.0f, (!is_home && controls.library_pressed ? 
-            DARKGRAY : (!is_home ? GRAY : WHITE))
+        DARKGRAY : (!is_home ? WHITE : GRAY))
     );
+    DrawText("Library", 3 * PADDING + 2 * 32 + 10, PADDING + 12, 22, (!is_home && controls.library_pressed ? 
+        DARKGRAY : (!is_home ? WHITE : GRAY))
+    );
+    // adding length of this number to the controls region for controls.library
+    // this makes the text be "clickable" with the icon
+    // printf("Library length: %d\n", library_length);
 
     DrawTextureEx(ui_textures.music, (Vector2){controls.music.x, controls.music.y}, 0.0f, 
-        controls.music_pressed ? 0.45f : 0.5f, controls.music_pressed ? GRAY : WHITE
+        controls.music_pressed ? 0.45f : 0.5f, controls.music_pressed ? WHITE : GRAY
     );
 
 }
