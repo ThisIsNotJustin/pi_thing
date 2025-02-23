@@ -86,7 +86,9 @@ typedef struct {
 typedef enum {
     STATE_LOGIN,
     STATE_QR_CODE,
-    STATE_APP
+    STATE_APP_MUSIC,
+    STATE_APP_HOME,
+    STATE_APP_LIBRARY
 } AppState;
 
 typedef struct {
@@ -108,6 +110,7 @@ typedef struct {
 } NetCmdData;
 
 typedef struct { 
+    Texture2D back;
     Texture2D play;
     Texture2D pause;
     Texture2D skip;
@@ -119,11 +122,13 @@ typedef struct {
 } UITextures;
 
 typedef struct {
+    Rectangle back;
     Rectangle play_pause;
     Rectangle shuffle;
     Rectangle skip;
     Rectangle prev;
     Rectangle like;
+    bool back_pressed;
     bool play_pause_pressed;
     bool shuffle_pressed;
     bool skip_pressed;
@@ -613,6 +618,10 @@ void* network_thread(void *arg) {
 
 bool load_ui() {
     Image img;
+    img = LoadImage("assets/back.png");
+    ui_textures.back = LoadTextureFromImage(img);
+    UnloadImage(img);
+
     img = LoadImage("assets/play.png");
     ui_textures.play = LoadTextureFromImage(img);
     UnloadImage(img);
@@ -803,7 +812,7 @@ void* gpio_thread_func(void* arg) {
     return NULL;
 }
 
-AppState display_qr(AppState currentState) {
+AppState display_qr(AppState current_state) {
     // Center the QR texture on screen
     int texX = (SCREEN_WIDTH - qrtexture.width) / 2;
     int texY = (SCREEN_HEIGHT - qrtexture.height) / 2;
@@ -813,11 +822,11 @@ AppState display_qr(AppState currentState) {
 
     pthread_mutex_lock(&logged_in_mutex);
     if (logged_in) {
-        currentState = STATE_APP;
+        current_state = STATE_APP_HOME;
     }
     pthread_mutex_unlock(&logged_in_mutex);
 
-    return currentState;
+    return current_state;
 }
 
 void truncate_text(char *output, const char *input, int max_width, int fontsize) {
@@ -837,7 +846,78 @@ void truncate_text(char *output, const char *input, int max_width, int fontsize)
     }
 }
 
-void display_app() {
+static ControlsRegion controls = {
+    .back = {SCREEN_WIDTH - PADDING - 32, PADDING, 32, 32},
+    .shuffle = {PADDING, SCREEN_HEIGHT - 66, 32, 32},
+    .prev = {212, SCREEN_HEIGHT - 66, 32, 32},
+    .play_pause = {384, SCREEN_HEIGHT - 66, 32, 30},
+    .skip = {556, SCREEN_HEIGHT - 66, 32, 32},
+    .like = {SCREEN_WIDTH - PADDING - 32, SCREEN_HEIGHT - 66, 32, 32},
+    .back_pressed = false,
+    .shuffle_pressed = false,
+    .prev_pressed = false,
+    .play_pause_pressed = false,
+    .skip_pressed = false,
+    .like_pressed = false,
+};
+
+void display_home(AppState current_state) {
+    DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Fade(BLACK, 0.7f));
+
+    Vector2 mouse_pos = GetMousePosition();
+    bool clicked = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+    bool tapped = false;
+    // absolutely no idea if this works
+    Vector2 touch_pos;
+    if (GetTouchPointCount() > 0) {
+        touch_pos = GetTouchPosition(0);
+        tapped = true;
+    }
+
+    DrawTextureEx(ui_textures.back, (Vector2){controls.back.x, controls.back.y}, 0.0f, 
+        controls.back_pressed ? 0.45f : 0.5f, controls.back_pressed ? GRAY : WHITE
+    );
+
+    if (clicked || tapped) {
+        Vector2 input_pos = clicked ? mouse_pos : touch_pos;
+        controls.back_pressed = false;
+
+        if (CheckCollisionPointRec(input_pos, controls.back)) {
+            controls.back_pressed = true;
+            current_state = STATE_APP_MUSIC;
+        }
+    }
+}
+
+void display_library(AppState current_state) {
+    DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Fade(BLACK, 0.7f));
+
+    Vector2 mouse_pos = GetMousePosition();
+    bool clicked = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+    bool tapped = false;
+    // absolutely no idea if this works
+    Vector2 touch_pos;
+    if (GetTouchPointCount() > 0) {
+        touch_pos = GetTouchPosition(0);
+        tapped = true;
+    }
+
+    DrawTextureEx(ui_textures.back, (Vector2){controls.back.x, controls.back.y}, 0.0f, 
+        controls.back_pressed ? 0.45f : 0.5f, controls.back_pressed ? GRAY : WHITE
+    );
+
+    if (clicked || tapped) {
+        Vector2 input_pos = clicked ? mouse_pos : touch_pos;
+        controls.back_pressed = false;
+
+        if (CheckCollisionPointRec(input_pos, controls.back)) {
+            controls.back_pressed = true;
+            current_state = STATE_APP_MUSIC;
+        }
+    }
+}
+
+void display_app(AppState current_state) {
     DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - 100, Fade(BLACK, 0.7f));
 
     pthread_mutex_lock(&album_art_mutex);
@@ -856,18 +936,6 @@ void display_app() {
     static bool cached_is_playing = false;
     static bool cached_is_shuffle = false;
     static bool cached_is_liked = false;
-    static ControlsRegion controls = {
-        .shuffle = {PADDING, SCREEN_HEIGHT - 66, 32, 32},
-        .prev = {212, SCREEN_HEIGHT - 66, 32, 32},
-        .play_pause = {384, SCREEN_HEIGHT - 66, 32, 30},
-        .skip = {556, SCREEN_HEIGHT - 66, 32, 32},
-        .like = {SCREEN_WIDTH - PADDING - 32, SCREEN_HEIGHT - 66, 32, 32},
-        .shuffle_pressed = false,
-        .prev_pressed = false,
-        .play_pause_pressed = false,
-        .skip_pressed = false,
-        .like_pressed = false,
-    };
 
     Vector2 mouse_pos = GetMousePosition();
     bool clicked = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
@@ -950,8 +1018,13 @@ void display_app() {
             controls.like_pressed ? GRAY : WHITE)
         );
 
+        DrawTextureEx(ui_textures.back, (Vector2){controls.back.x, controls.back.y}, 0.0f, 
+            controls.back_pressed ? 0.45f : 0.5f, controls.back_pressed ? GRAY : WHITE
+        );
+
         if (clicked || tapped) {
             Vector2 input_pos = clicked ? mouse_pos : touch_pos;
+            controls.back_pressed = false;
             controls.shuffle_pressed = false;
             controls.play_pause_pressed = false;
             controls.prev_pressed = false;
@@ -1016,6 +1089,9 @@ void display_app() {
                     pthread_mutex_unlock(&spclient_mutex);
                     should_refresh = true;
                 }
+            } else if (CheckCollisionPointRec(input_pos, controls.back)) {
+                controls.back_pressed = true;
+                current_state = STATE_APP_HOME;
             }
         }
 
@@ -1061,7 +1137,7 @@ int main() {
     int activeText = 0;
     char auth_url[1024] = {0};
 
-    AppState currentState = STATE_LOGIN;
+    AppState current_state = STATE_LOGIN;
 
     if (!load_ui()) {
         fprintf(stderr, "Failed to load UI assets\n");
@@ -1076,7 +1152,7 @@ int main() {
         BeginDrawing();
         ClearBackground(GetColor(GuiGetStyle(DEFAULT, BACKGROUND_COLOR)));
 
-        switch(currentState) {
+        switch(current_state) {
             case STATE_LOGIN:
                 // text is roughly centered above rectangle
                 // rectangle is centered plus padding between it and client secret text
@@ -1184,7 +1260,7 @@ int main() {
                             qrtexture = LoadTextureFromImage(qrimg);
                             UnloadImage(qrimg);
                             QRcode_free(qrcode);
-                            currentState = STATE_QR_CODE;
+                            current_state = STATE_QR_CODE;
                         }
                         
                         pthread_t server_thread;
@@ -1194,11 +1270,19 @@ int main() {
                 break;
 
             case STATE_QR_CODE:
-                currentState = display_qr(currentState);
+                current_state = display_qr(current_state);
                 break;
 
-            case STATE_APP:
-                display_app();
+            case STATE_APP_HOME:
+                display_home(current_state);
+                break;
+
+            case STATE_APP_LIBRARY:
+                display_library(current_state);
+                break;
+
+            case STATE_APP_MUSIC:
+                display_app(current_state);
                 break;
         }
 
