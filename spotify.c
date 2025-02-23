@@ -112,6 +112,8 @@ typedef struct {
 typedef struct { 
     Texture2D back;
     Texture2D music;
+    Texture2D home;
+    Texture2D library;
     Texture2D play;
     Texture2D pause;
     Texture2D skip;
@@ -125,6 +127,8 @@ typedef struct {
 typedef struct {
     Rectangle back;
     Rectangle music;
+    Rectangle home;
+    Rectangle library;
     Rectangle play_pause;
     Rectangle shuffle;
     Rectangle skip;
@@ -132,6 +136,8 @@ typedef struct {
     Rectangle like;
     bool back_pressed;
     bool music_pressed;
+    bool home_pressed;
+    bool library_pressed;
     bool play_pause_pressed;
     bool shuffle_pressed;
     bool skip_pressed;
@@ -629,6 +635,14 @@ bool load_ui() {
     ui_textures.music = LoadTextureFromImage(img);
     UnloadImage(img);
 
+    img = LoadImage("assets/home.png");
+    ui_textures.home = LoadTextureFromImage(img);
+    UnloadImage(img);
+
+    img = LoadImage("assets/library.png");
+    ui_textures.library = LoadTextureFromImage(img);
+    UnloadImage(img);
+
     img = LoadImage("assets/play.png");
     ui_textures.play = LoadTextureFromImage(img);
     UnloadImage(img);
@@ -854,6 +868,8 @@ void truncate_text(char *output, const char *input, int max_width, int fontsize)
 }
 
 static ControlsRegion controls = {
+    .home = {PADDING, PADDING, 32, 32},
+    .library = {2 * PADDING + 32, PADDING, 32, 32},
     .back = {SCREEN_WIDTH - PADDING - 32, PADDING, 32, 32},
     .music = {SCREEN_WIDTH - PADDING - 32, PADDING, 32, 32},
     .shuffle = {PADDING, SCREEN_HEIGHT - 66, 32, 32},
@@ -862,6 +878,9 @@ static ControlsRegion controls = {
     .skip = {556, SCREEN_HEIGHT - 66, 32, 32},
     .like = {SCREEN_WIDTH - PADDING - 32, SCREEN_HEIGHT - 66, 32, 32},
     .back_pressed = false,
+    .music_pressed = false,
+    .home_pressed = false,
+    .library_pressed = false,
     .shuffle_pressed = false,
     .prev_pressed = false,
     .play_pause_pressed = false,
@@ -869,8 +888,27 @@ static ControlsRegion controls = {
     .like_pressed = false,
 };
 
+void display_top_nav(bool is_home) {
+    DrawTextureEx(ui_textures.home, (Vector2){controls.home.x, controls.home.y}, 0.0f,
+        controls.home_pressed ? 0.9f : 1.0f, (is_home && controls.home_pressed ? 
+            DARKGRAY : (is_home ? GRAY : WHITE))
+    );
+
+    DrawTextureEx(ui_textures.library, (Vector2){controls.library.x, controls.library.y}, 0.0f,
+        controls.library_pressed ? 0.9f : 1.0f, (!is_home && controls.library_pressed ? 
+            DARKGRAY : (!is_home ? GRAY : WHITE))
+    );
+
+    DrawTextureEx(ui_textures.music, (Vector2){controls.music.x, controls.music.y}, 0.0f, 
+        controls.music_pressed ? 0.45f : 0.5f, controls.music_pressed ? GRAY : WHITE
+    );
+
+}
+
 AppState display_home(AppState current_state) {
     DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Fade(BLACK, 0.7f));
+
+    display_top_nav(true);
 
     Vector2 mouse_pos = GetMousePosition();
     bool clicked = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
@@ -882,15 +920,18 @@ AppState display_home(AppState current_state) {
         tapped = true;
     }
 
-    DrawTextureEx(ui_textures.music, (Vector2){controls.music.x, controls.music.y}, 0.0f, 
-        controls.music_pressed ? 0.45f : 0.5f, controls.music_pressed ? GRAY : WHITE
-    );
-
     if (clicked || tapped) {
         Vector2 input_pos = clicked ? mouse_pos : touch_pos;
         controls.music_pressed = false;
-
-        if (CheckCollisionPointRec(input_pos, controls.music)) {
+        controls.home_pressed = false;
+        controls.library_pressed = false;
+        
+        if (CheckCollisionPointRec(input_pos, controls.home)) {
+            controls.home_pressed = true;
+        } else if (CheckCollisionPointRec(input_pos, controls.library)) {
+            controls.library_pressed = true;
+            current_state = STATE_APP_LIBRARY;
+        } else if (CheckCollisionPointRec(input_pos, controls.music)) {
             controls.music_pressed = true;
             current_state = STATE_APP_MUSIC;
         }
@@ -902,6 +943,8 @@ AppState display_home(AppState current_state) {
 AppState display_library(AppState current_state) {
     DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Fade(BLACK, 0.7f));
 
+    display_top_nav(false);
+
     Vector2 mouse_pos = GetMousePosition();
     bool clicked = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
     bool tapped = false;
@@ -912,15 +955,18 @@ AppState display_library(AppState current_state) {
         tapped = true;
     }
 
-    DrawTextureEx(ui_textures.music, (Vector2){controls.music.x, controls.music.y}, 0.0f, 
-        controls.music_pressed ? 0.45f : 0.5f, controls.music_pressed ? GRAY : WHITE
-    );
-
     if (clicked || tapped) {
         Vector2 input_pos = clicked ? mouse_pos : touch_pos;
         controls.music_pressed = false;
-
-        if (CheckCollisionPointRec(input_pos, controls.music)) {
+        controls.home_pressed = false;
+        controls.library_pressed = false;
+        
+        if (CheckCollisionPointRec(input_pos, controls.home)) {
+            controls.home_pressed = true;
+            current_state = STATE_APP_HOME;
+        } else if (CheckCollisionPointRec(input_pos, controls.library)) {
+            controls.library_pressed = true;
+        } else if (CheckCollisionPointRec(input_pos, controls.music)) {
             controls.music_pressed = true;
             current_state = STATE_APP_MUSIC;
         }
