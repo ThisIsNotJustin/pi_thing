@@ -19,19 +19,12 @@
         Volume - if its 0-100 in the api just divide the potentiometer value by 2.55?
         call whatever spotify api with it I assume
             - volume change only on song view
-
-        home screen - the recent playlists/random spotify stuff screen
-        display 3 items at a time
-            - able to scroll through with potentiometer!
-
-        your library - your playlists and liked songs
-        display 3 items at a time I assume
-            - able to scroll through with potentiometer!
+            - from videos, the Car Thing can't actually even control volume
 
         like button does not actually work, it only makes a local
         color difference so implement that
 
-        Maybe add a playlist view but unsure if pi can handle it
+        refactor, remove what isn't used, remove all strncpy - quit using that
 */
 
 #define PP_BUTTON 23
