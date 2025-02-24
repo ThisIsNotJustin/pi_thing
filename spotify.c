@@ -69,6 +69,7 @@ typedef enum {
 } SearchResults;
 
 typedef struct {
+    char client_name[256];
     char client_id[256];
     char client_secret[256];
     char access_token[256];
@@ -81,6 +82,9 @@ typedef struct {
     bool shuffle;
     char current_playing_id[256];
     char current_track_id[256];
+    cJSON *playlists;
+    int total;
+    int offset
 } SpotifyClient;
 
 typedef enum {
@@ -361,6 +365,7 @@ bool spotify_request(const char *endpoint_base, const char *access_token) {
     return (res == CURLE_OK);
 }
 
+// change this to use new spotify_get()
 bool fetch_current_state(SongInfo *song) {
     CURL *curl = curl_easy_init();
     if (!curl) {
@@ -867,6 +872,107 @@ void truncate_text(char *output, const char *input, int max_width, int fontsize)
     }
 }
 
+cJSON* spotify_get(const char *endpoint_base, const char *access_token) {
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        return NULL;
+    }
+
+    MemoryBuffer region = {
+        malloc(1),
+        0
+    };
+
+    char auth_header[256];
+    snprintf(auth_header, sizeof(auth_header), "Authorization: Bearer %s", access_token);
+    
+    struct curl_slist *headers = NULL;
+    headers = curl_slist_append(headers, auth_header);
+    headers = curl_slist_append(headers, "Content-Type: application/json");
+
+    curl_easy_setopt(curl, CURLOPT_URL, endpoint);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, %region);
+        
+    CURLcode res = curl_easy_perform(curl);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    if (res != CURLE_OK || region.memory == 0) {
+        free(region.memory);
+        return NULL;
+    }
+
+    cJSON *json = cJSON_Parse(region.memory);
+    free(region.memory);
+    return json;
+}
+
+/*
+// Apparently deprecated end of 2024, thanks spotify.
+void fetch_rec(int limit, int offset) {
+    char endpoint[256];
+    char access_token_copy[256];
+    pthread_mutex_lock(&spclient_mutex);
+    snprintf(endpoint, sizeof(endpoint), 
+        "https://api.spotify.com/v1/browse/featured-playlists?limit=%d&offset=%d", 
+        limit, offset
+    );
+    snprintf(access_token_copy, sizeof(access_token_copy), spclient.access_token);
+    pthread_mutex_unlock(&spclient_mutex);
+
+    cJSON *json = spotify_get(endpoint, access_token_copy);
+
+}
+*/
+
+void fetch_user() {
+    char endpoint[256];
+    char access_token_copy[256];
+    pthread_mutex_lock(&spclient_mutex);
+    snprintf(endpoint, sizeof(endpoint), "https://api.spotify.com/v1/me");
+    snprintf(access_token_copy, sizeof(access_token_copy), spclient.access_token);
+    pthread_mutex_unlock(&spclient_mutex);
+
+    cJSON *json = spotify_get(endpoint, access_token_copy);
+    if (!json) {
+        return;
+    }
+
+    pthread_mutex_lock(&spclient_mutex);
+    cJSON *name = cJSON_GetObjectItem(json, "display_name");
+    if (cJSON_IsString(name)) {
+        snprintf(spclient.client_name, sizeof(spclient.client_name), name->valuestring);
+    }
+    pthread_mutex_unlock(&spclient_mutex);
+    cJSON_Delete(json);
+}
+
+void fetch_playlists(int limit, int offset) {
+    char endpoint[256];
+    char access_token_copy[256];
+    pthread_mutex_lock(&spclient_mutex);
+    snprintf(endpoint, sizeof(endpoint), "https://api.spotify.com/v1/users/%s/playlists?limit=%d&offset=%d", 
+        spclient.client_name, limit, offset);
+    snprintf(access_token_copy, sizeof(access_token_copy), spclient.access_token);
+    pthread_mutex_unlock(&spclient_mutex);
+
+    cJSON *json = spotify_get(endpoint, access_token_copy);
+    if (!json) {
+        return;
+    }
+
+    pthread_mutex_lock(&spclient_mutex);
+    if (spclient.playlists) {
+        cJSON_Delete(spclient.playlists);
+    }
+    spclient.playlists = cJSON_Duplicate(json, true);
+    pthread_mutex_unlock(&spclient_mutex);
+
+    cJSON_Delete(json);
+}
+
 static ControlsRegion controls = {
     .home = {PADDING, PADDING, 84, 32},
     .library = {3 * PADDING + 32, PADDING, 112, 32},
@@ -920,10 +1026,21 @@ void display_top_nav(bool is_home) {
 
 }
 
+void display_playlist(cJSON *playlist) {
+
+}
+
 AppState display_home(AppState current_state) {
     DrawRectangle(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, Fade(BLACK, 0.7f));
 
     display_top_nav(true);
+
+    cJSON *playlists;
+    int offset = 0;
+    pthread_mutex_lock(&spclient_mutex);
+    playlists = spclient.playlists;
+    offset = spclient.playlists;
+    pthread_mutex_unlock(&spclient_mutex);
 
     Vector2 mouse_pos = GetMousePosition();
     bool clicked = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
@@ -935,20 +1052,32 @@ AppState display_home(AppState current_state) {
         tapped = true;
     }
 
-    if (clicked || tapped) {
-        Vector2 input_pos = clicked ? mouse_pos : touch_pos;
-        controls.music_pressed = false;
-        controls.home_pressed = false;
-        controls.library_pressed = false;
-        
-        if (CheckCollisionPointRec(input_pos, controls.home)) {
-            controls.home_pressed = true;
-        } else if (CheckCollisionPointRec(input_pos, controls.library)) {
-            controls.library_pressed = true;
-            current_state = STATE_APP_LIBRARY;
-        } else if (CheckCollisionPointRec(input_pos, controls.music)) {
-            controls.music_pressed = true;
-            current_state = STATE_APP_MUSIC;
+    if (playlists) {
+        cJSON *items = cJSON_GetObjectItem(playlists, "item")
+        int item_count = cJSON_GetArraySize(items);
+
+        for (int i = 0; i < item_count; i++) {
+            cJSON *playlist = cJSON_GetArrayItem(items, i);
+            display_playlist(playlist);
+        }
+
+        if (clicked || tapped) {
+            Vector2 input_pos = clicked ? mouse_pos : touch_pos;
+            controls.music_pressed = false;
+            controls.home_pressed = false;
+            controls.library_pressed = false;
+            
+            if (CheckCollisionPointRec(input_pos, controls.home)) {
+                controls.home_pressed = true;
+            } else if (CheckCollisionPointRec(input_pos, controls.library)) {
+                controls.library_pressed = true;
+                current_state = STATE_APP_LIBRARY;
+            } else if (CheckCollisionPointRec(input_pos, controls.music)) {
+                controls.music_pressed = true;
+                current_state = STATE_APP_MUSIC;
+            }
+    
+    
         }
     }
 
@@ -970,6 +1099,7 @@ AppState display_library(AppState current_state) {
         tapped = true;
     }
 
+    // if ()
     if (clicked || tapped) {
         Vector2 input_pos = clicked ? mouse_pos : touch_pos;
         controls.music_pressed = false;
