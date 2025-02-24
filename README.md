@@ -8,6 +8,27 @@ The project is developed in C, utilizing the `pigpio` library for GPIO handling 
 
 ## Demo
 
+### Home View
+Displays a user's playlists
+![Demo](./demo/home_view.jpg)
+
+### Music View
+Displays the current song being played with graphical controls
+in addition to being able to be controlled with the physical buttons!
+![Demo](./demo/music_view.jpg)
+
+### Like Songs
+![Demo](./demo/like.jpg)
+
+### Toggle Shuffle
+![Demo](./demo/shuffle.jpg)
+
+### Pause/Play Songs
+Again fully controllable wit both the GUI and physical buttons
+![Demo](./demo/pause.jpg)
+
+## 3D Model
+
 ## Features
 
 - **Spotify Integration**: Control music playback, navigate playlists, and display track information via the Spotify API.
