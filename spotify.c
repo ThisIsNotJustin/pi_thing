@@ -84,7 +84,7 @@ typedef struct {
     char current_track_id[256];
     cJSON *playlists;
     int total;
-    int offset
+    int offset;
 } SpotifyClient;
 
 typedef enum {
@@ -890,10 +890,10 @@ cJSON* spotify_get(const char *endpoint_base, const char *access_token) {
     headers = curl_slist_append(headers, auth_header);
     headers = curl_slist_append(headers, "Content-Type: application/json");
 
-    curl_easy_setopt(curl, CURLOPT_URL, endpoint);
+    curl_easy_setopt(curl, CURLOPT_URL, endpoint_base);
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, %region);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &region);
         
     CURLcode res = curl_easy_perform(curl);
     curl_slist_free_all(headers);
@@ -1039,7 +1039,7 @@ AppState display_home(AppState current_state) {
     int offset = 0;
     pthread_mutex_lock(&spclient_mutex);
     playlists = spclient.playlists;
-    offset = spclient.playlists;
+    offset = spclient.offset;
     pthread_mutex_unlock(&spclient_mutex);
 
     Vector2 mouse_pos = GetMousePosition();
@@ -1053,7 +1053,7 @@ AppState display_home(AppState current_state) {
     }
 
     if (playlists) {
-        cJSON *items = cJSON_GetObjectItem(playlists, "item")
+        cJSON *items = cJSON_GetObjectItem(playlists, "item");
         int item_count = cJSON_GetArraySize(items);
 
         for (int i = 0; i < item_count; i++) {
