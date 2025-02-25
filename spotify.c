@@ -16,13 +16,14 @@
 
 /*
     TODO:
-        Volume - if its 0-100 in the api just divide the potentiometer value by 2.55?
-        call whatever spotify api with it I assume
-            - volume change only on song view
-            - from videos, the Car Thing can't actually even control volume
-
         like button does not actually work, it only makes a local
         color difference so implement that
+
+        clicking on a playlist does random choose a song, but it doesn't seem
+        to actually play songs on the playlist after the fact?
+            - it plays 1 random song from a playlist and then quits playing anything
+                after that song is over, until you click something else
+            - definitely misread or misuing an api then
 
         refactor, remove what isn't used, remove all strncpy - quit using that
 */
@@ -170,6 +171,9 @@ static Texture2D shuffle_texture = {0};
 static PlaylistTexture playlist_textures[MAX_PLAYLISTS] = {0};
 static int texture_count = 0;
 static cJSON *cached_playlists = NULL;
+static int display_vol = -1;
+static uint64_t volume_time = 0;
+static pthread_mutex_t volume_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 size_t write_callback(void *content, size_t size, size_t n, void *user) {
     size_t realsize = size * n;
@@ -803,6 +807,19 @@ void buttonPressed(int gpio, int level, uint32_t tick) {
     }
 }
 
+void display_volume(int target) {
+    float target_f = (float) target;
+    GuiProgressBar((Rectangle){ SCREEN_WIDTH - PADDING * 3, SCREEN_HEIGHT - 100 - PADDING, PADDING * 2.5, 12 }, "", 
+        "", &target_f, 0, 100);
+}
+
+uint64_t get_current_time() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+
+    return ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
 void* gpio_thread_func(void* arg) {
     if (gpioInitialise() < 0) {
         fprintf(stderr, "Failed to initialize pigpio\n");
@@ -829,19 +846,45 @@ void* gpio_thread_func(void* arg) {
     gpioSetAlertFunc(SKIP_BUTTON, buttonPressed);
     gpioSetAlertFunc(BACK_BUTTON, buttonPressed);
 
-    int prev = -1;
+    int prev_scaled = -1;
+    int target = -1;
+    int prev_target = -1;
+    uint64_t volume_change = 0;
+
     while (running) {
-        int values = readADC(i2cHandle, 0);
+        int values = 0;
+        values = readADC(i2cHandle, 0);
         if (values < 0) {
             fprintf(stderr, "Error reading ADC\n");
             break;
         }
 
-        if (values != prev) {
-            if (values > 0) {
-                printf("Volume: %d\n", values);
-                prev = values;
+        int scaled = (values * 100 + 127) / 255;
+        if (abs(scaled - prev_scaled) > 1) {
+            prev_scaled = scaled;
+            target = scaled;
+            volume_change = get_current_time();
+            pthread_mutex_lock(&volume_mutex);
+            display_vol = target;
+            volume_time = volume_change;
+            pthread_mutex_unlock(&volume_mutex);
+        }
+
+        char endpoint[256];
+        char access_token_copy[256];
+        if (target != -1 && (get_current_time() - volume_change) >= 250 &&
+            target != prev_target) {
+            snprintf(endpoint, sizeof(endpoint), 
+                "https://api.spotify.com/v1/me/player/volume?volume_percent=%d", target);
+            pthread_mutex_lock(&spclient_mutex);
+            snprintf(access_token_copy, sizeof(access_token_copy), spclient.access_token);
+            pthread_mutex_unlock(&spclient_mutex);
+            
+            if (spotify_request(endpoint, access_token_copy, NULL)) {
+                display_volume(target);
+                prev_target = target;
             }
+            target = -1;
         }
 
         time_sleep(0.1);
@@ -1403,6 +1446,15 @@ AppState display_app(AppState current_state) {
         current_track_id[sizeof(current_track_id) - 1] = '\0';
         cached_is_playing = spclient.is_playing;
         pthread_mutex_unlock(&spclient_mutex);
+
+        pthread_mutex_lock(&volume_mutex);
+        int current_vol = display_vol;
+        uint64_t current_vol_time = volume_time;
+        pthread_mutex_unlock(&volume_mutex);
+
+        if (current_vol != -1 && (get_current_time() - current_vol_time) < 2000) {
+            display_volume(current_vol);
+        }
 
         if (strcmp(current_track_id, prev_song_id) != 0) {
             refresh_album_art();
