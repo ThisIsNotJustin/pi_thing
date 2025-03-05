@@ -28,7 +28,8 @@ Again fully controllable wit both the GUI and physical buttons
 ![Demo](./demo/pause.jpg)
 
 ## 3D Model
-![3D](./demo/3d_model.jpg)
+![3D](./demo/screen.png)
+![3D](./demo/pi.png)
 ## Features
 
 - **Spotify Integration**: Control music playback, navigate playlists, and display track information via the Spotify API.
